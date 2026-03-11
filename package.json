@@ -1,12 +1,17 @@
 {
-  "name": "streamdeck-dynamic-switches",
-  "version": "1.0.0",
-  "description": "Dynamic, state-aware toggle switches for Elgato Stream Deck",
+  "name": "streamdeck-claude-code",
+  "version": "2.0.0",
+  "description": "Control Claude Code entirely from your Elgato Stream Deck",
   "main": "src/index.js",
-  "scripts": {
-    "start": "node src/index.js",
-    "test": "node --test test/*.test.js"
+  "bin": {
+    "streamdeck-claude": "bin/cli.js"
   },
-  "keywords": ["streamdeck", "stream-deck", "elgato", "toggle", "switches"],
+  "scripts": {
+    "start": "node bin/cli.js start",
+    "setup": "node bin/cli.js setup",
+    "test": "node --test test/*.test.js",
+    "demo": "node src/demo.js"
+  },
+  "keywords": ["streamdeck", "stream-deck", "elgato", "claude", "claude-code", "ai"],
   "license": "MIT"
 }

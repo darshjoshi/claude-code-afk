@@ -1,59 +1,39 @@
+const ClaudeCodeController = require("./controller/ClaudeCodeController");
+const BridgeServer = require("./bridge/BridgeServer");
+const { WebSocketServer } = require("./bridge/WebSocketServer");
+const HookReceiver = require("./hooks/HookReceiver");
+const { installHooks, uninstallHooks, generateHookConfig } = require("./hooks/installHooks");
+const StreamDeckAdapter = require("./streamdeck/StreamDeckAdapter");
+const ButtonRenderer = require("./streamdeck/ButtonRenderer");
+const { ACTIONS, LAYOUTS, getAction, getLayout, listActions, listCategories } = require("./streamdeck/actions");
+
+// Also re-export the original switch primitives
 const DynamicSwitch = require("./DynamicSwitch");
 const SwitchManager = require("./SwitchManager");
-const presets = require("./presets");
 
-module.exports = { DynamicSwitch, SwitchManager, presets };
+module.exports = {
+  // Core
+  ClaudeCodeController,
+  BridgeServer,
+  WebSocketServer,
+  HookReceiver,
+  StreamDeckAdapter,
+  ButtonRenderer,
 
-// When run directly, demonstrate the switches in action
-if (require.main === module) {
-  const manager = new SwitchManager();
+  // Hooks
+  installHooks,
+  uninstallHooks,
+  generateHookConfig,
 
-  manager.on("switch:change", ({ switchId, state }) => {
-    console.log(`[${switchId}] → ${state.label} (${state.color})`);
-  });
+  // Actions & Layouts
+  ACTIONS,
+  LAYOUTS,
+  getAction,
+  getLayout,
+  listActions,
+  listCategories,
 
-  manager.on("switch:blocked", ({ reason }) => {
-    console.log(`[blocked] ${reason}`);
-  });
-
-  // Load a demo configuration
-  manager.loadConfig([
-    presets.muteToggle(0, ({ state }) => {
-      console.log(`  action: microphone is now ${state.label}`);
-    }),
-    presets.sceneCycler(1, ["Game", "Camera", "Desktop", "BRB"]),
-    presets.pushToTalk(2),
-    presets.timedToggle(3, 1000),
-  ]);
-
-  console.log("Stream Deck Dynamic Switches - Demo");
-  console.log("====================================\n");
-  console.log(`Loaded ${manager.size} switches:\n`);
-
-  const snap = manager.snapshot();
-  for (const [id, info] of Object.entries(snap)) {
-    console.log(`  Key ${info.keyIndex}: ${info.name} [${info.state.label}] (${info.mode})`);
-  }
-
-  console.log("\nSimulating key presses...\n");
-
-  // Simulate mute toggle
-  manager.handleKeyDown(0);
-  manager.handleKeyDown(0);
-
-  // Simulate scene cycling
-  manager.handleKeyDown(1);
-  manager.handleKeyDown(1);
-  manager.handleKeyDown(1);
-
-  // Simulate push-to-talk
-  console.log("\n--- Push-to-talk (press & release) ---");
-  manager.handleKeyDown(2);
-  manager.handleKeyUp(2);
-
-  console.log("\nFinal state:");
-  const finalSnap = manager.snapshot();
-  for (const [id, info] of Object.entries(finalSnap)) {
-    console.log(`  ${info.name}: ${info.state.label}`);
-  }
-}
+  // Switch primitives
+  DynamicSwitch,
+  SwitchManager,
+};
