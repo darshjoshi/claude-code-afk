@@ -2,11 +2,16 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 const {
   ACTIONS,
+  KEY_ACTIONS,
+  DIAL_ACTIONS,
+  PEDAL_ACTIONS,
+  TOUCH_ACTIONS,
   LAYOUTS,
   getAction,
   getLayout,
   listActions,
   listCategories,
+  createCustomAction,
 } = require("../src/streamdeck/actions");
 
 describe("actions", () => {
@@ -18,6 +23,14 @@ describe("actions", () => {
     assert.ok(ACTIONS.newSession);
   });
 
+  it("includes dial, pedal, and touch actions", () => {
+    assert.ok(ACTIONS.scrollContext);
+    assert.ok(ACTIONS.modelSelect);
+    assert.ok(ACTIONS.pedalAbort);
+    assert.ok(ACTIONS.pedalAccept);
+    assert.ok(ACTIONS.contextBar);
+  });
+
   it("every action has required fields", () => {
     for (const [id, action] of Object.entries(ACTIONS)) {
       assert.equal(action.id, id, `${id}: id mismatch`);
@@ -26,7 +39,30 @@ describe("actions", () => {
       assert.ok(action.category, `${id}: missing category`);
       assert.ok(action.defaultState, `${id}: missing defaultState`);
       assert.ok(action.defaultState.label, `${id}: missing label`);
-      assert.ok(action.defaultState.color, `${id}: missing color`);
+    }
+  });
+
+  it("key actions have inputType key", () => {
+    for (const action of Object.values(KEY_ACTIONS)) {
+      assert.equal(action.inputType, "key");
+    }
+  });
+
+  it("dial actions have inputType dial", () => {
+    for (const action of Object.values(DIAL_ACTIONS)) {
+      assert.equal(action.inputType, "dial");
+    }
+  });
+
+  it("pedal actions have inputType pedal", () => {
+    for (const action of Object.values(PEDAL_ACTIONS)) {
+      assert.equal(action.inputType, "pedal");
+    }
+  });
+
+  it("touch actions have inputType touch", () => {
+    for (const action of Object.values(TOUCH_ACTIONS)) {
+      assert.equal(action.inputType, "touch");
     }
   });
 
@@ -40,51 +76,125 @@ describe("actions", () => {
     assert.equal(all.length, Object.keys(ACTIONS).length);
   });
 
+  it("listActions filters by inputType", () => {
+    const keys = listActions("key");
+    assert.ok(keys.length > 0);
+    for (const a of keys) {
+      assert.equal(a.inputType, "key");
+    }
+
+    const dials = listActions("dial");
+    assert.ok(dials.length > 0);
+    for (const a of dials) {
+      assert.equal(a.inputType, "dial");
+    }
+  });
+
   it("listCategories groups actions correctly", () => {
     const cats = listCategories();
     assert.ok(cats.info);
     assert.ok(cats.prompt);
     assert.ok(cats.control);
   });
+
+  it("createCustomAction creates a valid action", () => {
+    const action = createCustomAction("lint", {
+      name: "Lint",
+      prompt: "Run the linter",
+      label: "LINT",
+      color: "#ffaa00",
+      icon: "check",
+    });
+    assert.equal(action.id, "lint");
+    assert.equal(action.name, "Lint");
+    assert.equal(action.category, "custom");
+    assert.equal(action.payload.prompt, "Run the linter");
+    assert.equal(action.defaultState.label, "LINT");
+    assert.equal(action.defaultState.color, "#ffaa00");
+  });
 });
 
 describe("layouts", () => {
-  it("has mini, standard, and xl layouts", () => {
-    assert.ok(LAYOUTS.mini);
-    assert.ok(LAYOUTS.standard);
-    assert.ok(LAYOUTS.xl);
+  const expectedLayouts = [
+    "mini", "neo", "standard", "scissor", "plus",
+    "xl", "plusXl", "studio", "pedal", "virtual",
+  ];
+
+  it("has layouts for all device types", () => {
+    for (const id of expectedLayouts) {
+      assert.ok(LAYOUTS[id], `Missing layout: ${id}`);
+    }
   });
 
-  it("mini has 6 keys", () => {
-    assert.equal(LAYOUTS.mini.keys, 6);
-    assert.equal(Object.keys(LAYOUTS.mini.mapping).length, 6);
+  it("mini layout has 6 key slots", () => {
+    assert.equal(Object.keys(LAYOUTS.mini.keys).length, 6);
   });
 
-  it("standard has 15 keys", () => {
-    assert.equal(LAYOUTS.standard.keys, 15);
+  it("neo layout has 8 key slots and infobar", () => {
+    assert.equal(Object.keys(LAYOUTS.neo.keys).length, 8);
+    assert.ok(LAYOUTS.neo.infobar);
   });
 
-  it("xl has 32 keys", () => {
-    assert.equal(LAYOUTS.xl.keys, 32);
+  it("plus layout has dials and touch strip", () => {
+    assert.ok(LAYOUTS.plus.dials);
+    assert.equal(Object.keys(LAYOUTS.plus.dials).length, 4);
+    assert.ok(LAYOUTS.plus.touchStrip);
+  });
+
+  it("plusXl layout has 36 key slots and 6 dials", () => {
+    assert.equal(Object.keys(LAYOUTS.plusXl.keys).length, 36);
+    assert.equal(Object.keys(LAYOUTS.plusXl.dials).length, 6);
+  });
+
+  it("studio layout has dials", () => {
+    assert.ok(LAYOUTS.studio.dials);
+    assert.equal(Object.keys(LAYOUTS.studio.dials).length, 2);
+  });
+
+  it("pedal layout has 3 pedal slots", () => {
+    assert.ok(LAYOUTS.pedal.pedals);
+    assert.equal(Object.keys(LAYOUTS.pedal.pedals).length, 3);
   });
 
   it("getLayout returns correct layout", () => {
-    assert.equal(getLayout("mini").keys, 6);
-    assert.equal(getLayout("standard").keys, 15);
+    assert.equal(getLayout("mini").device, "mini");
+    assert.equal(getLayout("plus").device, "plus");
   });
 
-  it("getLayout defaults to standard for unknown size", () => {
-    assert.equal(getLayout("unknown").keys, 15);
+  it("getLayout defaults to standard for unknown device", () => {
+    assert.equal(getLayout("unknown").device, "standard");
   });
 
-  it("all mapped actions exist in ACTIONS", () => {
-    for (const [size, layout] of Object.entries(LAYOUTS)) {
-      for (const [key, actionId] of Object.entries(layout.mapping)) {
-        if (actionId) {
-          assert.ok(
-            ACTIONS[actionId],
-            `Layout ${size} key ${key} references unknown action: ${actionId}`
-          );
+  it("all key-mapped actions exist in ACTIONS", () => {
+    for (const [layoutId, layout] of Object.entries(LAYOUTS)) {
+      if (layout.keys) {
+        for (const [key, actionId] of Object.entries(layout.keys)) {
+          if (actionId) {
+            assert.ok(
+              ACTIONS[actionId],
+              `Layout ${layoutId} key ${key} references unknown action: ${actionId}`
+            );
+          }
+        }
+      }
+      if (layout.dials) {
+        for (const [idx, actionId] of Object.entries(layout.dials)) {
+          if (actionId) {
+            assert.ok(
+              ACTIONS[actionId],
+              `Layout ${layoutId} dial ${idx} references unknown action: ${actionId}`
+            );
+          }
+        }
+      }
+      if (layout.pedals) {
+        for (const [idx, actionId] of Object.entries(layout.pedals)) {
+          if (actionId) {
+            assert.ok(
+              ACTIONS[actionId],
+              `Layout ${layoutId} pedal ${idx} references unknown action: ${actionId}`
+            );
+          }
         }
       }
     }

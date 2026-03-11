@@ -5,7 +5,12 @@ const HookReceiver = require("./hooks/HookReceiver");
 const { installHooks, uninstallHooks, generateHookConfig } = require("./hooks/installHooks");
 const StreamDeckAdapter = require("./streamdeck/StreamDeckAdapter");
 const ButtonRenderer = require("./streamdeck/ButtonRenderer");
-const { ACTIONS, LAYOUTS, getAction, getLayout, listActions, listCategories } = require("./streamdeck/actions");
+const { DEVICES, getDevice, createCustomDevice, listDevices, describeDevice } = require("./streamdeck/devices");
+const {
+  ACTIONS, KEY_ACTIONS, DIAL_ACTIONS, PEDAL_ACTIONS, TOUCH_ACTIONS,
+  LAYOUTS, getAction, getLayout, listActions, listCategories, createCustomAction,
+} = require("./streamdeck/actions");
+const ConfigManager = require("./config/ConfigManager");
 
 // Also re-export the original switch primitives
 const DynamicSwitch = require("./DynamicSwitch");
@@ -20,18 +25,33 @@ module.exports = {
   StreamDeckAdapter,
   ButtonRenderer,
 
+  // Config
+  ConfigManager,
+
   // Hooks
   installHooks,
   uninstallHooks,
   generateHookConfig,
 
+  // Devices
+  DEVICES,
+  getDevice,
+  createCustomDevice,
+  listDevices,
+  describeDevice,
+
   // Actions & Layouts
   ACTIONS,
+  KEY_ACTIONS,
+  DIAL_ACTIONS,
+  PEDAL_ACTIONS,
+  TOUCH_ACTIONS,
   LAYOUTS,
   getAction,
   getLayout,
   listActions,
   listCategories,
+  createCustomAction,
 
   // Switch primitives
   DynamicSwitch,
