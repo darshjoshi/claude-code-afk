@@ -39,6 +39,22 @@ const KEY_ACTIONS = {
     handler: null,
   },
 
+  respondAlert: {
+    id: "respondAlert",
+    name: "Respond Alert",
+    description: "Blinks red when Claude needs your response — press to dismiss and switch to terminal",
+    inputType: "key",
+    category: "info",
+    defaultState: { label: "—", color: "#1a1a1a", icon: "circle" },
+    alertState: {
+      label: "RESPOND",
+      onColor: "#cc0000",
+      offColor: "#330000",
+      icon: "alert",
+    },
+    handler: "dismissAlert",
+  },
+
   // ── Quick Prompts ──────────────────────────────────────────
   reviewCode: {
     id: "reviewCode",
@@ -382,8 +398,8 @@ const LAYOUTS = {
     device: "mini",
     keys: {
       0: "status",
-      1: "reviewCode",
-      2: "fixBugs",
+      1: "respondAlert",
+      2: "reviewCode",
       3: "abort",
       4: "commit",
       5: "newSession",
@@ -395,9 +411,9 @@ const LAYOUTS = {
     device: "neo",
     keys: {
       0: "status",
-      1: "reviewCode",
-      2: "fixBugs",
-      3: "writeTests",
+      1: "respondAlert",
+      2: "reviewCode",
+      3: "fixBugs",
       4: "abort",
       5: "commit",
       6: "newSession",
@@ -415,8 +431,8 @@ const LAYOUTS = {
     device: "standard",
     keys: {
       0: "status",
-      1: "toolIndicator",
-      2: null,
+      1: "respondAlert",
+      2: "toolIndicator",
       3: "gitStatus",
       4: "gitDiff",
       5: "reviewCode",
@@ -437,8 +453,8 @@ const LAYOUTS = {
     device: "scissor",
     keys: {
       0: "status",
-      1: "toolIndicator",
-      2: null,
+      1: "respondAlert",
+      2: "toolIndicator",
       3: "gitStatus",
       4: "gitDiff",
       5: "reviewCode",
@@ -459,7 +475,7 @@ const LAYOUTS = {
     device: "plus",
     keys: {
       0: "status",
-      1: "reviewCode",
+      1: "respondAlert",
       2: "fixBugs",
       3: "writeTests",
       4: "abort",
@@ -481,9 +497,8 @@ const LAYOUTS = {
     device: "xl",
     keys: {
       0: "status",
-      1: "toolIndicator",
-      2: null,
-      3: null,
+      1: "respondAlert",
+      2: "toolIndicator",
       4: null,
       5: null,
       6: "gitStatus",
@@ -520,8 +535,8 @@ const LAYOUTS = {
     device: "plusXl",
     keys: {
       0: "status",
-      1: "toolIndicator",
-      2: null,
+      1: "respondAlert",
+      2: "toolIndicator",
       3: null,
       4: null,
       5: null,
@@ -572,9 +587,8 @@ const LAYOUTS = {
     device: "studio",
     keys: {
       0: "status",
-      1: "toolIndicator",
-      2: null,
-      3: null,
+      1: "respondAlert",
+      2: "toolIndicator",
       4: null,
       5: null,
       6: "gitStatus",
@@ -625,9 +639,8 @@ const LAYOUTS = {
     device: "virtual",
     keys: {
       0: "status",
-      1: "toolIndicator",
-      2: null,
-      3: null,
+      1: "respondAlert",
+      2: "toolIndicator",
       4: null,
       5: null,
       6: "gitStatus",

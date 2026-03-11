@@ -5,6 +5,7 @@ const HookReceiver = require("./hooks/HookReceiver");
 const { installHooks, uninstallHooks, generateHookConfig } = require("./hooks/installHooks");
 const StreamDeckAdapter = require("./streamdeck/StreamDeckAdapter");
 const ButtonRenderer = require("./streamdeck/ButtonRenderer");
+const AlertManager = require("./streamdeck/AlertManager");
 const { DEVICES, getDevice, createCustomDevice, listDevices, describeDevice } = require("./streamdeck/devices");
 const {
   ACTIONS, KEY_ACTIONS, DIAL_ACTIONS, PEDAL_ACTIONS, TOUCH_ACTIONS,
@@ -24,6 +25,7 @@ module.exports = {
   HookReceiver,
   StreamDeckAdapter,
   ButtonRenderer,
+  AlertManager,
 
   // Config
   ConfigManager,

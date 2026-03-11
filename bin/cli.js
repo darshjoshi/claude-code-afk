@@ -61,7 +61,6 @@ async function startServer() {
     allowedTools: config.toJSON().claude.allowedTools,
   });
   const bridge = new BridgeServer({ port });
-  const hooks = new HookReceiver(bridge);
 
   // Resolve layout (config overrides > device defaults)
   const layout = config.getLayout();
@@ -77,6 +76,9 @@ async function startServer() {
     layout,
     customActions,
   });
+
+  // Wire hooks to adapter so alerts trigger on attention-needed events
+  const hooks = new HookReceiver(bridge, { adapter });
 
   // Log hook events
   hooks.on("hook", (event) => {
@@ -97,6 +99,14 @@ async function startServer() {
 
   adapter.on("pedalDown", ({ pedalIndex, actionId }) => {
     console.log(`[deck] Pedal ${pedalIndex} -> ${actionId}`);
+  });
+
+  adapter.on("alert:start", ({ buttonId, reason }) => {
+    console.log(`[ALERT] BLINKING: ${reason} — respond now!`);
+  });
+
+  adapter.on("alert:clear", ({ buttonId, reason, duration }) => {
+    console.log(`[alert] Cleared (${reason}, ${Math.round(duration / 1000)}s)`);
   });
 
   bridge.on("client:connected", () => {

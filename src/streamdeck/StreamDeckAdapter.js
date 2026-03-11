@@ -1,6 +1,7 @@
 const { EventEmitter } = require("events");
 const { getAction, getLayout } = require("./actions");
 const ButtonRenderer = require("./ButtonRenderer");
+const AlertManager = require("./AlertManager");
 
 /**
  * Connects the bridge server to Stream Deck action logic.
@@ -8,6 +9,7 @@ const ButtonRenderer = require("./ButtonRenderer");
  * dispatches them to the ClaudeCodeController, and updates button visuals.
  *
  * Supports all input types: keys, dials (rotate/press), pedals, and touch.
+ * Includes a blinking red alert system for when Claude needs your response.
  */
 class StreamDeckAdapter extends EventEmitter {
   constructor(bridge, controller, options = {}) {
@@ -20,10 +22,14 @@ class StreamDeckAdapter extends EventEmitter {
     this._dialValues = {};
     this._customPrompts = options.customPrompts || {};
     this._customActions = options.customActions || {};
+    this.alertManager = new AlertManager({
+      blinkIntervalMs: options.blinkIntervalMs || 500,
+    });
 
     this._initButtonStates();
     this._bindBridgeCommands();
     this._bindControllerEvents();
+    this._bindAlertManager();
   }
 
   /**
@@ -116,6 +122,9 @@ class StreamDeckAdapter extends EventEmitter {
           case "setCustomPrompt":
             this._customPrompts[msg.buttonId] = msg.prompt;
             break;
+          case "dismissAlert":
+            this._handleDismissAlert(msg.buttonId);
+            break;
           default:
             this.bridge.broadcast("error", {
               error: `Unknown action: ${msg.action}`,
@@ -139,6 +148,10 @@ class StreamDeckAdapter extends EventEmitter {
     });
 
     this.controller.on("prompt:sent", ({ prompt }) => {
+      // User responded — clear any active alert
+      this.alertManager.clearAlert("respondAlert");
+      this._resetRespondButton();
+
       this._updateButton("status", {
         label: "RUNNING",
         color: "#00cc66",
@@ -172,6 +185,66 @@ class StreamDeckAdapter extends EventEmitter {
     });
   }
 
+  /**
+   * Wire up the AlertManager to push blink frames to Stream Deck buttons.
+   */
+  _bindAlertManager() {
+    this.alertManager.on("blink", ({ buttonId, state }) => {
+      // Push the blink frame directly — don't save to _buttonStates
+      // so that when the alert clears, we can restore the default state
+      const svg = this.renderer.render(state);
+      this.bridge.updateButton(buttonId, state);
+      this.bridge.broadcast("button:render", {
+        buttonId,
+        state,
+        svg,
+      });
+    });
+
+    this.alertManager.on("alert:start", ({ buttonId, reason }) => {
+      this.bridge.broadcast("alert:start", { buttonId, reason });
+      this.emit("alert:start", { buttonId, reason });
+    });
+
+    this.alertManager.on("alert:clear", ({ buttonId, reason, duration }) => {
+      this.bridge.broadcast("alert:clear", { buttonId, reason, duration });
+      this.emit("alert:clear", { buttonId, reason, duration });
+    });
+  }
+
+  /**
+   * Trigger the blinking red RESPOND alert.
+   * Called by the HookReceiver when Claude needs user attention.
+   */
+  triggerRespondAlert(reason, sublabel) {
+    const action = this._resolveAction("respondAlert");
+    const alertConfig = action?.alertState || {};
+
+    this.alertManager.startAlert("respondAlert", {
+      reason,
+      label: alertConfig.label || "RESPOND",
+      sublabel: sublabel || reason || "",
+      onColor: alertConfig.onColor || "#cc0000",
+      offColor: alertConfig.offColor || "#330000",
+      icon: alertConfig.icon || "alert",
+    });
+  }
+
+  /**
+   * Clear the RESPOND alert and restore the button to its quiet state.
+   */
+  dismissRespondAlert() {
+    this.alertManager.clearAlert("respondAlert");
+    this._resetRespondButton();
+  }
+
+  _resetRespondButton() {
+    const action = this._resolveAction("respondAlert");
+    if (action) {
+      this._updateButton("respondAlert", { ...action.defaultState });
+    }
+  }
+
   // ── Key handling ──────────────────────────────────────────
 
   async _handleKeyDown(keyIndex) {
@@ -181,14 +254,16 @@ class StreamDeckAdapter extends EventEmitter {
     const action = this._resolveAction(actionId);
     if (!action) return;
 
-    // Flash the button
-    this._updateButton(actionId, {
-      ...this._buttonStates[actionId],
-      color: "#ffffff",
-    });
-    setTimeout(() => {
-      this._updateButton(actionId, this._buttonStates[actionId]);
-    }, 150);
+    // Flash the button (skip if it's currently alerting)
+    if (!this.alertManager.isAlerting(actionId)) {
+      this._updateButton(actionId, {
+        ...this._buttonStates[actionId],
+        color: "#ffffff",
+      });
+      setTimeout(() => {
+        this._updateButton(actionId, this._buttonStates[actionId]);
+      }, 150);
+    }
 
     await this._executeAction(action, actionId);
     this.emit("keyDown", { keyIndex, actionId });
@@ -207,7 +282,6 @@ class StreamDeckAdapter extends EventEmitter {
     const action = this._resolveAction(actionId);
     if (!action) return;
 
-    // Update dial value within bounds
     const step = action.step || 1;
     const min = action.min || 0;
     const max = action.max || 100;
@@ -237,7 +311,6 @@ class StreamDeckAdapter extends EventEmitter {
     const action = this._resolveAction(actionId);
     if (!action) return;
 
-    // Dial press uses onPress handler if defined, otherwise default handler
     if (action.onPress === "resetScroll") {
       this._dialValues[actionId] = 0;
       this._updateButton(actionId, {
@@ -325,7 +398,18 @@ class StreamDeckAdapter extends EventEmitter {
       case "pushToTalk":
         this.bridge.broadcast("ptt:start", {});
         break;
+      case "dismissAlert":
+        this._handleDismissAlert(actionId);
+        break;
     }
+  }
+
+  _handleDismissAlert(buttonId) {
+    const id = buttonId || "respondAlert";
+    this.alertManager.clearAlert(id);
+    this._resetRespondButton();
+    this.bridge.broadcast("alert:dismissed", { buttonId: id });
+    this.emit("alert:dismissed", { buttonId: id });
   }
 
   async _handleSendPrompt(prompt, options = {}) {
@@ -333,6 +417,10 @@ class StreamDeckAdapter extends EventEmitter {
   }
 
   _handleAbort() {
+    // Aborting counts as responding — clear alert
+    this.alertManager.clearAlert("respondAlert");
+    this._resetRespondButton();
+
     const aborted = this.controller.abort();
     if (aborted) {
       this._updateButton("status", {
@@ -351,6 +439,10 @@ class StreamDeckAdapter extends EventEmitter {
   }
 
   _handleResetSession() {
+    // Resetting clears alert
+    this.alertManager.clearAlert("respondAlert");
+    this._resetRespondButton();
+
     this.controller.resetSession();
     this._updateButton("status", {
       label: "NEW",
@@ -368,6 +460,8 @@ class StreamDeckAdapter extends EventEmitter {
 
   _handleGetStatus() {
     const status = this.controller.getStatus();
+    status.alerting = this.alertManager.hasActiveAlerts;
+    status.activeAlerts = this.alertManager.activeAlerts;
     this.bridge.broadcast("status:response", status);
   }
 

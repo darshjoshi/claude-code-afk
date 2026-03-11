@@ -4,26 +4,32 @@ const { EventEmitter } = require("events");
  * Receives HTTP hook callbacks from Claude Code and translates them
  * into events that update Stream Deck button states.
  *
- * Claude Code hooks POST JSON to our bridge server. This module
- * registers the routes and emits normalized events.
+ * When Claude needs the user's attention (notification, permission
+ * request, or stop/waiting), this triggers a blinking red RESPOND
+ * alert on the Stream Deck via the adapter's AlertManager.
  *
- * Supported Claude Code hook events:
- *   - Notification: Claude needs user attention
- *   - Stop: Claude finished responding
- *   - PreToolUse: Claude is about to use a tool
- *   - PostToolUse: Claude finished using a tool
- *   - UserPromptSubmit: User sent a prompt
- *   - PermissionRequest: Claude needs permission
+ * The alert clears automatically when:
+ *   - The user presses the RESPOND button
+ *   - The user sends a new prompt
+ *   - Claude resumes working (prompt-submit hook)
+ *   - A new session starts
  */
 class HookReceiver extends EventEmitter {
-  constructor(bridgeServer) {
+  constructor(bridgeServer, options = {}) {
     super();
     this.bridge = bridgeServer;
+    this.adapter = options.adapter || null;
     this._registerRoutes();
   }
 
+  /**
+   * Connect to a StreamDeckAdapter (can be set after construction).
+   */
+  setAdapter(adapter) {
+    this.adapter = adapter;
+  }
+
   _registerRoutes() {
-    // Each Claude Code hook event gets its own endpoint
     const hookEvents = [
       "notification",
       "stop",
@@ -41,7 +47,6 @@ class HookReceiver extends EventEmitter {
       });
     }
 
-    // Catch-all for any hook event
     this.bridge.route("POST", "/hooks", (req, res, body) => {
       const eventType = body?.event || "unknown";
       this._handleHook(eventType, body, res);
@@ -53,11 +58,8 @@ class HookReceiver extends EventEmitter {
     this.emit("hook", normalized);
     this.emit(`hook:${event}`, normalized);
 
-    // Update bridge state based on event
     this._updateBridgeState(event, normalized);
 
-    // Respond to Claude Code
-    // Exit code 0 = allow (continue), exit code 2 = block
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
   }
@@ -84,17 +86,26 @@ class HookReceiver extends EventEmitter {
           label: "ACTIVE",
           color: "#00cc66",
         });
+        // Session start means Claude is working — clear any stale alert
+        if (this.adapter) {
+          this.adapter.dismissRespondAlert();
+        }
         break;
 
       case "stop":
+        // Claude stopped and is waiting for you to respond!
         this.bridge.updateState({
-          claudeStatus: "idle",
+          claudeStatus: "waiting",
           lastEvent: event,
         });
         this.bridge.updateButton("status", {
-          label: "IDLE",
-          color: "#4488ff",
+          label: "WAITING",
+          color: "#ffcc00",
         });
+        // BLINK: Claude finished — your turn to respond
+        if (this.adapter) {
+          this.adapter.triggerRespondAlert("stop", "Your turn");
+        }
         break;
 
       case "notification":
@@ -106,6 +117,13 @@ class HookReceiver extends EventEmitter {
           label: "ATTENTION",
           color: "#ffcc00",
         });
+        // BLINK: Claude is asking for your attention
+        if (this.adapter) {
+          this.adapter.triggerRespondAlert(
+            "notification",
+            data.message ? data.message.substring(0, 15) : "Needs input"
+          );
+        }
         break;
 
       case "permission-request":
@@ -117,6 +135,20 @@ class HookReceiver extends EventEmitter {
           label: "PERMIT?",
           color: "#ff6600",
         });
+        // BLINK: Claude needs permission approval
+        if (this.adapter) {
+          this.adapter.triggerRespondAlert(
+            "permission",
+            data.tool ? `Allow ${data.tool}?` : "Permission needed"
+          );
+        }
+        break;
+
+      case "prompt-submit":
+        // User just submitted a prompt — they responded, clear alert
+        if (this.adapter) {
+          this.adapter.dismissRespondAlert();
+        }
         break;
 
       case "pre-tool-use":
@@ -142,6 +174,10 @@ class HookReceiver extends EventEmitter {
           label: "OFFLINE",
           color: "#333333",
         });
+        // Session ended — clear alert
+        if (this.adapter) {
+          this.adapter.dismissRespondAlert();
+        }
         break;
     }
   }

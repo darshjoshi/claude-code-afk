@@ -55,7 +55,7 @@ describe("ConfigManager", () => {
     config.setKeyAction(0, "abort");
     const layout = config.getLayout();
     assert.equal(layout.keys[0], "abort"); // overridden
-    assert.equal(layout.keys[1], "toolIndicator"); // from default
+    assert.equal(layout.keys[1], "respondAlert"); // from default
   });
 
   it("setDialAction stores dial mapping", () => {
