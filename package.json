@@ -1,0 +1,12 @@
+{
+  "name": "streamdeck-dynamic-switches",
+  "version": "1.0.0",
+  "description": "Dynamic, state-aware toggle switches for Elgato Stream Deck",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": ["streamdeck", "stream-deck", "elgato", "toggle", "switches"],
+  "license": "MIT"
+}
