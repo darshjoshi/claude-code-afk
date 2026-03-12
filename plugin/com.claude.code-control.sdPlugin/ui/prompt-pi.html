@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Claude Prompt</title>
+  <link rel="stylesheet" href="https://sdpi-components.dev/css/sdpi.css" />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 8px; }
+    .sdpi-wrapper { margin-bottom: 8px; }
+    textarea { width: 100%; min-height: 60px; resize: vertical; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div class="sdpi-wrapper">
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Prompt Type</div>
+      <select class="sdpi-item-value" id="actionId">
+        <optgroup label="Code">
+          <option value="reviewCode">Review Code</option>
+          <option value="fixBugs">Fix Bugs</option>
+          <option value="writeTests">Write Tests</option>
+          <option value="explain">Explain Code</option>
+          <option value="refactor">Refactor</option>
+          <option value="runTests">Run Tests</option>
+        </optgroup>
+        <optgroup label="Git">
+          <option value="commit">Commit</option>
+          <option value="gitStatus">Git Status</option>
+          <option value="gitDiff">Git Diff</option>
+          <option value="gitPush">Git Push</option>
+        </optgroup>
+        <optgroup label="Custom">
+          <option value="customPrompt">Custom Prompt</option>
+        </optgroup>
+      </select>
+    </div>
+  </div>
+
+  <div class="sdpi-wrapper hidden" id="customSection">
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Custom Prompt</div>
+      <textarea class="sdpi-item-value" id="customPrompt" placeholder="Enter your custom prompt..."></textarea>
+    </div>
+  </div>
+
+  <script>
+    const $SD = window.$SD || {};
+    let settings = {};
+
+    // Listen for settings from Stream Deck
+    if (window.$SD) {
+      $SD.onDidReceiveSettings("com.claude.code-control.prompt", (ev) => {
+        settings = ev.payload.settings || {};
+        loadSettings();
+      });
+    }
+
+    // Also handle the connectElgatoStreamDeckSocket pattern
+    function connectElgatoStreamDeckSocket(inPort, inPluginUUID, inRegisterEvent, inInfo) {
+      const ws = new WebSocket("ws://127.0.0.1:" + inPort);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ event: inRegisterEvent, uuid: inPluginUUID }));
+        ws.send(JSON.stringify({ event: "getSettings", context: inPluginUUID }));
+      };
+      ws.onmessage = (evt) => {
+        const data = JSON.parse(evt.data);
+        if (data.event === "didReceiveSettings") {
+          settings = data.payload.settings || {};
+          loadSettings();
+        }
+      };
+      window._ws = ws;
+      window._uuid = inPluginUUID;
+    }
+
+    function loadSettings() {
+      document.getElementById("actionId").value = settings.actionId || "reviewCode";
+      document.getElementById("customPrompt").value = settings.customPrompt || "";
+      toggleCustom();
+    }
+
+    function saveSettings() {
+      settings.actionId = document.getElementById("actionId").value;
+      settings.customPrompt = document.getElementById("customPrompt").value;
+      if (window._ws && window._uuid) {
+        window._ws.send(JSON.stringify({
+          event: "setSettings",
+          context: window._uuid,
+          payload: settings,
+        }));
+      }
+    }
+
+    function toggleCustom() {
+      const isCustom = document.getElementById("actionId").value === "customPrompt";
+      document.getElementById("customSection").classList.toggle("hidden", !isCustom);
+    }
+
+    document.getElementById("actionId").addEventListener("change", () => {
+      toggleCustom();
+      saveSettings();
+    });
+    document.getElementById("customPrompt").addEventListener("input", saveSettings);
+  </script>
+</body>
+</html>

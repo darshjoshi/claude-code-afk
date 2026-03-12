@@ -4,9 +4,11 @@ const ClaudeCodeController = require("../src/controller/ClaudeCodeController");
 const BridgeServer = require("../src/bridge/BridgeServer");
 const HookReceiver = require("../src/hooks/HookReceiver");
 const StreamDeckAdapter = require("../src/streamdeck/StreamDeckAdapter");
+const SessionTracker = require("../src/session/SessionTracker");
+const TerminalFocuser = require("../src/session/TerminalFocuser");
 const { installHooks, uninstallHooks } = require("../src/hooks/installHooks");
 const { listActions, listCategories, LAYOUTS, createCustomAction } = require("../src/streamdeck/actions");
-const { listDevices, describeDevice } = require("../src/streamdeck/devices");
+const { listDevices, describeDevice, getDevice } = require("../src/streamdeck/devices");
 const ConfigManager = require("../src/config/ConfigManager");
 
 const [,, command, ...args] = process.argv;
@@ -71,18 +73,53 @@ async function startServer() {
     }
   }
 
+  // Multi-session support
+  const sessionTracker = new SessionTracker();
+  const terminalFocuser = new TerminalFocuser();
+  const device = getDevice(deckSize) || { keys: 15, cols: 5 };
+
+  // Load LED configuration from saved preferences
+  const ledConfig = config.getLedConfig() || {};
+
   const adapter = new StreamDeckAdapter(bridge, controller, {
     deckSize,
     layout,
     customActions,
+    sessionTracker,
+    terminalFocuser,
+    device,
+    ledOverrides: ledConfig.overrides || null,
+    stateStyleMap: ledConfig.stateStyles || null,
+    defaultAnimation: ledConfig.animation || null,
+    sessionColorPalette: ledConfig.sessionColors || null,
   });
 
   // Wire hooks to adapter so alerts trigger on attention-needed events
-  const hooks = new HookReceiver(bridge, { adapter });
+  const hooks = new HookReceiver(bridge, { adapter, sessionTracker });
 
   // Log hook events
   hooks.on("hook", (event) => {
-    console.log(`[hook] ${event.event}${event.tool ? ` (${event.tool})` : ""}`);
+    console.log(`[hook] ${event.event}${event.tool ? ` (${event.tool})` : ""}${event.sessionId ? ` [${event.sessionId.slice(-4)}]` : ""}`);
+  });
+
+  // Log session events
+  sessionTracker.on("session:added", ({ sessionId }) => {
+    console.log(`[session] Added: ${sessionId.slice(-4)} (${sessionTracker.sessionCount} active)`);
+  });
+  sessionTracker.on("session:removed", ({ sessionId }) => {
+    console.log(`[session] Removed: ${sessionId.slice(-4)} (${sessionTracker.sessionCount} active)`);
+  });
+  sessionTracker.on("permission:pending", ({ sessionId, tool }) => {
+    console.log(`[PERMISSION] Session ${sessionId.slice(-4)} awaiting approval for: ${tool}`);
+  });
+  sessionTracker.on("permission:resolved", ({ sessionId, decision }) => {
+    console.log(`[permission] Session ${sessionId.slice(-4)} -> ${decision}`);
+  });
+  sessionTracker.on("question:pending", ({ sessionId }) => {
+    console.log(`[QUESTION] Session ${sessionId.slice(-4)} waiting for response`);
+  });
+  sessionTracker.on("question:resolved", ({ sessionId }) => {
+    console.log(`[question] Session ${sessionId.slice(-4)} question resolved`);
   });
 
   controller.on("status:change", ({ previous, current }) => {
@@ -115,7 +152,7 @@ async function startServer() {
 
   await bridge.start();
 
-  const device = config.getDevice();
+  const deviceInfo = config.getDevice();
   const layoutName = layout.name || deckSize;
   console.log(`
 ┌─────────────────────────────────────────────────┐
@@ -123,11 +160,12 @@ async function startServer() {
 ├─────────────────────────────────────────────────┤
 │  Server:    http://127.0.0.1:${String(port).padEnd(21)}│
 │  WebSocket: ws://127.0.0.1:${String(port).padEnd(23)}│
-│  Device:    ${device.name.padEnd(37)}│
+│  Device:    ${deviceInfo.name.padEnd(37)}│
 │  Layout:    ${layoutName.substring(0, 37).padEnd(37)}│
 │  CWD:       ${workingDir.substring(0, 37).padEnd(37)}│
 ├─────────────────────────────────────────────────┤
-│  Inputs: ${String(device.keys || 0).padStart(2)} keys, ${String(device.dials || 0)} dials, ${String(device.pedals || 0)} pedals${" ".repeat(11)}│
+│  Inputs: ${String(deviceInfo.keys || 0).padStart(2)} keys, ${String(deviceInfo.dials || 0)} dials, ${String(deviceInfo.pedals || 0)} pedals${" ".repeat(11)}│
+│  Multi-session: enabled                        │
 ├─────────────────────────────────────────────────┤
 │  Hook endpoints:                                │
 │    POST /hooks/notification                     │
@@ -143,6 +181,7 @@ async function startServer() {
 
   process.on("SIGINT", async () => {
     console.log("\nShutting down...");
+    sessionTracker.destroy();
     await bridge.stop();
     process.exit(0);
   });
@@ -336,6 +375,115 @@ function handleConfig() {
       break;
     }
 
+    // ── LED commands ────────────────────────────────────────
+    case "set-led": {
+      const side = args[1];
+      const color = args[2];
+      const brightness = args[3] ? parseInt(args[3], 10) : undefined;
+      if (!side || !color || !["left", "right"].includes(side)) {
+        console.error("Usage: streamdeck-claude config set-led <left|right> <#hex> [brightness]");
+        console.error("Example: streamdeck-claude config set-led left #ff00ff 80");
+        process.exit(1);
+      }
+      config.setLedColor(side, color, brightness);
+      config.save();
+      console.log(`LED ${side}: ${color}${brightness !== undefined ? ` @ ${brightness}%` : ""}`);
+      break;
+    }
+
+    case "clear-led": {
+      const side = args[1]; // optional
+      if (side && !["left", "right"].includes(side)) {
+        console.error("Usage: streamdeck-claude config clear-led [left|right]");
+        process.exit(1);
+      }
+      config.clearLedColor(side);
+      config.save();
+      console.log(side ? `LED ${side} override cleared` : "All LED overrides cleared");
+      break;
+    }
+
+    case "set-led-state": {
+      const state = args[1];
+      const style = args[2];
+      const validStates = ["idle", "active", "running", "waiting", "permission", "attention", "offline"];
+      const validStyles = ["idle", "active", "attention", "permission", "waiting", "dim", "off",
+        "navHighlight", "contextWarning", "contextCritical"];
+      if (!state || !style) {
+        console.error("Usage: streamdeck-claude config set-led-state <state> <style>");
+        console.error(`  States:  ${validStates.join(", ")}`);
+        console.error(`  Styles:  ${validStyles.join(", ")}`);
+        console.error("Example: streamdeck-claude config set-led-state active permission");
+        process.exit(1);
+      }
+      config.setLedStateStyle(state, style);
+      config.save();
+      console.log(`LED state "${state}" -> style "${style}"`);
+      break;
+    }
+
+    case "set-led-animation": {
+      const pattern = args[1];
+      const validPatterns = ["blink", "breathe", "pulse", "rainbow", "chase", "flash"];
+      if (!pattern || !validPatterns.includes(pattern)) {
+        console.error("Usage: streamdeck-claude config set-led-animation <pattern>");
+        console.error(`  Patterns: ${validPatterns.join(", ")}`);
+        process.exit(1);
+      }
+      config.setLedAnimation(pattern);
+      config.save();
+      console.log(`LED animation: ${pattern}`);
+      break;
+    }
+
+    case "set-session-palette": {
+      // Remaining args are colors
+      const colors = args.slice(1).filter((c) => c.startsWith("#"));
+      if (colors.length === 0) {
+        console.error("Usage: streamdeck-claude config set-session-palette #color1 #color2 ...");
+        console.error("Example: streamdeck-claude config set-session-palette #ff6600 #cc00ff #00ccff");
+        process.exit(1);
+      }
+      config.setSessionColorPalette(colors);
+      config.save();
+      console.log(`Session color palette: ${colors.join(", ")}`);
+      break;
+    }
+
+    case "show-led": {
+      const ledCfg = config.getLedConfig();
+      if (!ledCfg || Object.keys(ledCfg).length === 0) {
+        console.log("LEDs: using dynamic defaults (no custom config)");
+      } else {
+        console.log("LED Configuration:");
+        if (ledCfg.overrides) {
+          console.log("  Static overrides:");
+          for (const [side, val] of Object.entries(ledCfg.overrides)) {
+            console.log(`    ${side}: ${val.color}${val.brightness !== undefined ? ` @ ${val.brightness}%` : ""}`);
+          }
+        }
+        if (ledCfg.stateStyles) {
+          console.log("  State-to-style mapping:");
+          for (const [state, style] of Object.entries(ledCfg.stateStyles)) {
+            console.log(`    ${state} -> ${style}`);
+          }
+        }
+        if (ledCfg.animation) {
+          console.log(`  Animation pattern: ${ledCfg.animation}`);
+        }
+        if (ledCfg.sessionColors) {
+          console.log(`  Session palette: ${ledCfg.sessionColors.join(", ")}`);
+        }
+        if (ledCfg.sessionOverrides) {
+          console.log("  Session overrides:");
+          for (const [sid, color] of Object.entries(ledCfg.sessionOverrides)) {
+            console.log(`    ${sid}: ${color}`);
+          }
+        }
+      }
+      break;
+    }
+
     case "reset":
       config.reset();
       config.save();
@@ -354,6 +502,16 @@ Config commands:
   config add-action <id> [options]     Create custom prompt action
   config remove-action <id>            Remove custom action
   config reset                         Reset to defaults
+
+LED commands:
+  config set-led <left|right> <#hex> [brightness]
+                                       Set static LED color
+  config clear-led [left|right]        Clear LED overrides
+  config set-led-state <state> <style> Map system state to LED style
+  config set-led-animation <pattern>   Set attention animation
+                                       (blink/breathe/pulse/rainbow/chase/flash)
+  config set-session-palette <colors>  Set session color palette
+  config show-led                      Show current LED config
 
 Config file: ~/.streamdeck-claude/config.json
 `);

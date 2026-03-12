@@ -4,21 +4,19 @@ const { EventEmitter } = require("events");
  * Receives HTTP hook callbacks from Claude Code and translates them
  * into events that update Stream Deck button states.
  *
- * When Claude needs the user's attention (notification, permission
- * request, or stop/waiting), this triggers a blinking red RESPOND
- * alert on the Stream Deck via the adapter's AlertManager.
+ * When a SessionTracker is provided, permission requests (pre-tool-use)
+ * and questions (stop) can be "held" — the HTTP response is not sent
+ * immediately, allowing the user to approve/deny from the Stream Deck.
  *
- * The alert clears automatically when:
- *   - The user presses the RESPOND button
- *   - The user sends a new prompt
- *   - Claude resumes working (prompt-submit hook)
- *   - A new session starts
+ * Without a SessionTracker, behaves exactly as before: immediate
+ * responses and a single respondAlert for attention-needed events.
  */
 class HookReceiver extends EventEmitter {
   constructor(bridgeServer, options = {}) {
     super();
     this.bridge = bridgeServer;
     this.adapter = options.adapter || null;
+    this.sessionTracker = options.sessionTracker || null;
     this._registerRoutes();
   }
 
@@ -58,8 +56,16 @@ class HookReceiver extends EventEmitter {
     this.emit("hook", normalized);
     this.emit(`hook:${event}`, normalized);
 
-    this._updateBridgeState(event, normalized);
+    // Forward context window data if present
+    this._updateContextFromHook(normalized);
 
+    // If we have a SessionTracker, use multi-session logic
+    if (this.sessionTracker) {
+      return this._handleWithSessionTracker(event, normalized, res);
+    }
+
+    // Legacy single-session mode
+    this._updateBridgeState(event, normalized);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ status: "ok" }));
   }
@@ -71,9 +77,144 @@ class HookReceiver extends EventEmitter {
       sessionId: body?.session_id || null,
       tool: body?.tool_name || body?.tool || null,
       message: body?.message || body?.notification || null,
+      // Context window usage (when provided by Claude Code hooks)
+      tokensUsed: body?.tokens_used || body?.context_tokens || null,
+      maxTokens: body?.max_tokens || body?.context_max || null,
       raw: body,
     };
   }
+
+  /**
+   * Extract and forward context window data to the adapter's InfobarManager.
+   * Claude Code hooks may include token counts in various fields.
+   */
+  _updateContextFromHook(data) {
+    if (!this.adapter?.infobarManager) return;
+    if (data.tokensUsed != null) {
+      this.adapter.infobarManager.updateContext(
+        data.tokensUsed,
+        data.maxTokens || undefined
+      );
+    }
+  }
+
+  // ── Multi-session mode (with SessionTracker) ───────────────
+
+  _handleWithSessionTracker(event, data, res) {
+    const sessionId = data.sessionId;
+
+    switch (event) {
+      case "session-start":
+        if (sessionId) {
+          this.sessionTracker.registerSession(sessionId);
+          this.sessionTracker.updateStatus(sessionId, event);
+        }
+        this._respondOk(res);
+        break;
+
+      case "session-end":
+        if (sessionId) {
+          this.sessionTracker.updateStatus(sessionId, event);
+          this.sessionTracker.removeSession(sessionId);
+        }
+        this._respondOk(res);
+        break;
+
+      case "pre-tool-use": {
+        if (!sessionId) {
+          this._respondOk(res);
+          break;
+        }
+
+        const tool = data.tool;
+
+        // Check if tool is already approved for this session
+        if (this.sessionTracker.hasSessionApproval(sessionId, tool)) {
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ decision: "allow" }));
+          this.sessionTracker.updateStatus(sessionId, event, { tool });
+          break;
+        }
+
+        // Hold the HTTP response — Claude waits
+        this.sessionTracker.updateStatus(sessionId, event, { tool });
+        this.sessionTracker.setPendingPermission(sessionId, {
+          tool,
+          body: data.raw,
+          resolve: (response) => {
+            try {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify(response));
+            } catch {
+              // Client may have disconnected
+            }
+          },
+        });
+        break;
+      }
+
+      case "stop": {
+        if (!sessionId) {
+          this._updateBridgeState(event, data);
+          this._respondOk(res);
+          break;
+        }
+
+        // Hold the HTTP response for stop hooks too
+        this.sessionTracker.updateStatus(sessionId, event);
+        this.sessionTracker.setPendingQuestion(sessionId, {
+          message: data.message,
+          resolve: (response) => {
+            try {
+              res.writeHead(200, { "Content-Type": "application/json" });
+              res.end(JSON.stringify(response));
+            } catch {
+              // Client may have disconnected
+            }
+          },
+        });
+        break;
+      }
+
+      case "prompt-submit":
+        if (sessionId) {
+          // User responded in terminal — resolve any pending question
+          this.sessionTracker.resolveQuestion(sessionId);
+          this.sessionTracker.updateStatus(sessionId, event);
+        }
+        this._respondOk(res);
+        break;
+
+      case "notification":
+        if (sessionId) {
+          this.sessionTracker.updateStatus(sessionId, event, {
+            message: data.message,
+          });
+        }
+        // Also update bridge state for backward compat
+        this._updateBridgeState(event, data);
+        this._respondOk(res);
+        break;
+
+      default:
+        // post-tool-use, permission-request, etc.
+        if (sessionId) {
+          this.sessionTracker.updateStatus(sessionId, event, {
+            tool: data.tool,
+          });
+        }
+        this._updateBridgeState(event, data);
+        this._respondOk(res);
+        break;
+    }
+  }
+
+  _respondOk(res) {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ status: "ok" }));
+  }
+
+  // ── Legacy single-session bridge state updates ─────────────
 
   _updateBridgeState(event, data) {
     switch (event) {

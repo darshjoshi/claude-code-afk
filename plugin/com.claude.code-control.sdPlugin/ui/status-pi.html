@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Claude Status</title>
+  <link rel="stylesheet" href="https://sdpi-components.dev/css/sdpi.css" />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 8px; }
+  </style>
+</head>
+<body>
+  <div class="sdpi-wrapper">
+    <div class="sdpi-item">
+      <div class="sdpi-item-label">Display Type</div>
+      <select class="sdpi-item-value" id="actionId">
+        <option value="status">Claude Status</option>
+        <option value="respondAlert">Respond Alert</option>
+        <option value="toolIndicator">Current Tool</option>
+      </select>
+    </div>
+  </div>
+
+  <script>
+    let settings = {};
+
+    function connectElgatoStreamDeckSocket(inPort, inPluginUUID, inRegisterEvent, inInfo) {
+      const ws = new WebSocket("ws://127.0.0.1:" + inPort);
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ event: inRegisterEvent, uuid: inPluginUUID }));
+        ws.send(JSON.stringify({ event: "getSettings", context: inPluginUUID }));
+      };
+      ws.onmessage = (evt) => {
+        const data = JSON.parse(evt.data);
+        if (data.event === "didReceiveSettings") {
+          settings = data.payload.settings || {};
+          document.getElementById("actionId").value = settings.actionId || "status";
+        }
+      };
+      window._ws = ws;
+      window._uuid = inPluginUUID;
+    }
+
+    function saveSettings() {
+      settings.actionId = document.getElementById("actionId").value;
+      if (window._ws && window._uuid) {
+        window._ws.send(JSON.stringify({
+          event: "setSettings",
+          context: window._uuid,
+          payload: settings,
+        }));
+      }
+    }
+
+    document.getElementById("actionId").addEventListener("change", saveSettings);
+  </script>
+</body>
+</html>

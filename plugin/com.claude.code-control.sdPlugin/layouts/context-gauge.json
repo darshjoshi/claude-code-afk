@@ -1,0 +1,51 @@
+{
+  "id": "com.claude.code-control.context-gauge.layout",
+  "items": [
+    {
+      "key": "gauge-label",
+      "type": "text",
+      "rect": [10, 5, 180, 20],
+      "font": {
+        "size": 13,
+        "weight": 400
+      },
+      "color": "#888888",
+      "alignment": "left",
+      "text": "Context"
+    },
+    {
+      "key": "gauge-bar",
+      "type": "bar",
+      "rect": [10, 30, 180, 16],
+      "bar_bg_c": "0:#333333,1:#333333",
+      "bar_fill_c": "0:#00cc66,1:#00cc66",
+      "value": 0,
+      "subtype": 4,
+      "border_w": 1
+    },
+    {
+      "key": "gauge-percent",
+      "type": "text",
+      "rect": [10, 52, 80, 22],
+      "font": {
+        "size": 16,
+        "weight": 700
+      },
+      "color": "#ffffff",
+      "alignment": "left",
+      "text": "0%"
+    },
+    {
+      "key": "gauge-tokens",
+      "type": "text",
+      "rect": [90, 56, 100, 18],
+      "font": {
+        "size": 11,
+        "weight": 400
+      },
+      "color": "#888888",
+      "alignment": "right",
+      "text": "0k / 200k"
+    }
+  ]
+}
