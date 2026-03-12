@@ -104,6 +104,28 @@ class AlertManager extends EventEmitter {
   }
 
   /**
+   * Clear all alerts whose buttonId starts with a given prefix.
+   * Useful for clearing all session-related alerts (e.g., "session:").
+   */
+  clearByPrefix(prefix) {
+    const cleared = [];
+    for (const buttonId of this._alerts.keys()) {
+      if (buttonId.startsWith(prefix)) {
+        cleared.push(buttonId);
+        this.clearAlert(buttonId);
+      }
+    }
+    return cleared;
+  }
+
+  /**
+   * Get all currently alerting button IDs.
+   */
+  getAlertingIds() {
+    return [...this._alerts.keys()];
+  }
+
+  /**
    * Check if a button is currently alerting.
    */
   isAlerting(buttonId) {

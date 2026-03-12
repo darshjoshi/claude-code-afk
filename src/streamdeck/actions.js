@@ -190,6 +190,107 @@ const KEY_ACTIONS = {
     },
   },
 
+  // ── Session & Permission Control ──────────────────────────
+  sessionButton: {
+    id: "sessionButton",
+    name: "Session Button",
+    description: "Shows a session's status — press to focus/manage",
+    inputType: "key",
+    category: "session",
+    defaultState: { label: "SESS", color: "#444444", icon: "circle" },
+    handler: "focusSession",
+  },
+
+  allowTool: {
+    id: "allowTool",
+    name: "Allow Tool",
+    description: "Allow the pending tool permission request",
+    inputType: "key",
+    category: "permission",
+    defaultState: { label: "ALLOW", color: "#00cc66", icon: "check" },
+    handler: "permissionDecision",
+  },
+
+  allowToolSession: {
+    id: "allowToolSession",
+    name: "Allow Tool (Session)",
+    description: "Allow the tool for the rest of this session",
+    inputType: "key",
+    category: "permission",
+    defaultState: { label: "ALLOW\nSESS", color: "#4488ff", icon: "check" },
+    handler: "permissionDecision",
+  },
+
+  denyTool: {
+    id: "denyTool",
+    name: "Deny Tool",
+    description: "Deny the pending tool permission request",
+    inputType: "key",
+    category: "permission",
+    defaultState: { label: "DENY", color: "#cc0000", icon: "stop" },
+    handler: "permissionDecision",
+  },
+
+  focusTerminal: {
+    id: "focusTerminal",
+    name: "Focus Terminal",
+    description: "Bring the terminal window for this session to the front",
+    inputType: "key",
+    category: "session",
+    defaultState: { label: "FOCUS", color: "#ffcc00", icon: "eye" },
+    handler: "focusTerminal",
+  },
+
+  backButton: {
+    id: "backButton",
+    name: "Back",
+    description: "Navigate back to the previous view",
+    inputType: "key",
+    category: "nav",
+    defaultState: { label: "BACK", color: "#666666", icon: "circle" },
+    handler: "navigateBack",
+  },
+
+  sessionsView: {
+    id: "sessionsView",
+    name: "Sessions",
+    description: "Show all active Claude Code sessions",
+    inputType: "key",
+    category: "nav",
+    defaultState: { label: "SESSIONS", color: "#4488ff", icon: "message" },
+    handler: "showSessions",
+  },
+
+  permissionInfo: {
+    id: "permissionInfo",
+    name: "Permission Info",
+    description: "Display-only button showing tool or question info",
+    inputType: "key",
+    category: "info",
+    defaultState: { label: "INFO", color: "#ff6600", icon: "shield" },
+    handler: null,
+  },
+
+  prevPage: {
+    id: "prevPage",
+    name: "Previous Page",
+    description: "Go to the previous page of sessions",
+    inputType: "key",
+    category: "nav",
+    defaultState: { label: "PREV", color: "#666666", icon: "circle" },
+    handler: "prevPage",
+  },
+
+  nextPage: {
+    id: "nextPage",
+    name: "Next Page",
+    description: "Go to the next page of sessions",
+    inputType: "key",
+    category: "nav",
+    defaultState: { label: "NEXT", color: "#666666", icon: "circle" },
+    handler: "nextPage",
+  },
+
   // ── Custom Prompt ──────────────────────────────────────────
   customPrompt: {
     id: "customPrompt",
@@ -368,6 +469,29 @@ const TOUCH_ACTIONS = {
     handler: null,
   },
 
+  contextGauge: {
+    id: "contextGauge",
+    name: "Context Window Gauge",
+    description: "Visual progress bar of context window usage with percentage and token counts",
+    inputType: "touch",
+    category: "info",
+    defaultState: {
+      label: "Context",
+      value: 0,
+      max: 200000,
+      percent: 0,
+      display: "░░░░░░░░░░░░░░░ 0%",
+    },
+    // Color thresholds: gauge bar color changes as context fills up
+    thresholds: {
+      low: { below: 50, color: "#00cc66" },      // green: plenty of room
+      medium: { below: 75, color: "#ffcc00" },    // yellow: getting full
+      high: { below: 90, color: "#ff6600" },      // orange: watch out
+      critical: { below: 101, color: "#cc0000" }, // red: almost out
+    },
+    handler: null,
+  },
+
   costBar: {
     id: "costBar",
     name: "Cost Bar",
@@ -378,6 +502,70 @@ const TOUCH_ACTIONS = {
     handler: null,
   },
 };
+
+/**
+ * Touch point LED configuration for Neo's left/right touch buttons.
+ * Each touch point can have a static or dynamic LED color.
+ *
+ * The Neo hardware supports setting LED brightness and color on
+ * each touch point via the Elgato SDK. This bridge communicates
+ * LED state to the Stream Deck plugin via WebSocket.
+ */
+const TOUCH_POINT_STYLES = {
+  // Static presets
+  default: {
+    left: { color: "#ffffff", brightness: 50 },
+    right: { color: "#ffffff", brightness: 50 },
+  },
+  dim: {
+    left: { color: "#666666", brightness: 20 },
+    right: { color: "#666666", brightness: 20 },
+  },
+  off: {
+    left: { color: "#000000", brightness: 0 },
+    right: { color: "#000000", brightness: 0 },
+  },
+
+  // Contextual styles — applied dynamically based on state
+  idle: {
+    left: { color: "#4488ff", brightness: 30 },
+    right: { color: "#4488ff", brightness: 30 },
+  },
+  active: {
+    left: { color: "#00cc66", brightness: 60 },
+    right: { color: "#00cc66", brightness: 60 },
+  },
+  attention: {
+    left: { color: "#cc0000", brightness: 100 },
+    right: { color: "#cc0000", brightness: 100 },
+  },
+  permission: {
+    left: { color: "#ff6600", brightness: 100 },
+    right: { color: "#ff6600", brightness: 100 },
+  },
+  waiting: {
+    left: { color: "#ffcc00", brightness: 80 },
+    right: { color: "#ffcc00", brightness: 80 },
+  },
+
+  // Asymmetric — different colors per side
+  navHighlight: {
+    left: { color: "#4488ff", brightness: 50 },
+    right: { color: "#4488ff", brightness: 50 },
+  },
+  contextWarning: {
+    left: { color: "#ffcc00", brightness: 60 },
+    right: { color: "#ff6600", brightness: 60 },
+  },
+  contextCritical: {
+    left: { color: "#cc0000", brightness: 100 },
+    right: { color: "#cc0000", brightness: 100 },
+  },
+};
+
+function getTouchPointStyle(name) {
+  return TOUCH_POINT_STYLES[name] || TOUCH_POINT_STYLES.default;
+}
 
 // Unified action registry
 const ACTIONS = {
@@ -423,7 +611,7 @@ const LAYOUTS = {
       0: "prevPage",
       1: "nextPage",
     },
-    infobar: "contextBar",
+    infobar: "contextGauge",
   },
 
   standard: {
@@ -723,9 +911,11 @@ module.exports = {
   DIAL_ACTIONS,
   PEDAL_ACTIONS,
   TOUCH_ACTIONS,
+  TOUCH_POINT_STYLES,
   LAYOUTS,
   getAction,
   getLayout,
+  getTouchPointStyle,
   listActions,
   listCategories,
   createCustomAction,

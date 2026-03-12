@@ -9,9 +9,15 @@ const AlertManager = require("./streamdeck/AlertManager");
 const { DEVICES, getDevice, createCustomDevice, listDevices, describeDevice } = require("./streamdeck/devices");
 const {
   ACTIONS, KEY_ACTIONS, DIAL_ACTIONS, PEDAL_ACTIONS, TOUCH_ACTIONS,
-  LAYOUTS, getAction, getLayout, listActions, listCategories, createCustomAction,
+  TOUCH_POINT_STYLES, LAYOUTS,
+  getAction, getLayout, getTouchPointStyle,
+  listActions, listCategories, createCustomAction,
 } = require("./streamdeck/actions");
 const ConfigManager = require("./config/ConfigManager");
+const LayoutManager = require("./streamdeck/LayoutManager");
+const InfobarManager = require("./streamdeck/InfobarManager");
+const SessionTracker = require("./session/SessionTracker");
+const TerminalFocuser = require("./session/TerminalFocuser");
 
 // Also re-export the original switch primitives
 const DynamicSwitch = require("./DynamicSwitch");
@@ -29,6 +35,12 @@ module.exports = {
 
   // Config
   ConfigManager,
+  LayoutManager,
+  InfobarManager,
+
+  // Session management
+  SessionTracker,
+  TerminalFocuser,
 
   // Hooks
   installHooks,
@@ -48,9 +60,11 @@ module.exports = {
   DIAL_ACTIONS,
   PEDAL_ACTIONS,
   TOUCH_ACTIONS,
+  TOUCH_POINT_STYLES,
   LAYOUTS,
   getAction,
   getLayout,
+  getTouchPointStyle,
   listActions,
   listCategories,
   createCustomAction,

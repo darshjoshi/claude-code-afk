@@ -2,6 +2,8 @@ const { EventEmitter } = require("events");
 const { getAction, getLayout } = require("./actions");
 const ButtonRenderer = require("./ButtonRenderer");
 const AlertManager = require("./AlertManager");
+const LayoutManager = require("./LayoutManager");
+const InfobarManager = require("./InfobarManager");
 
 /**
  * Connects the bridge server to Stream Deck action logic.
@@ -10,6 +12,9 @@ const AlertManager = require("./AlertManager");
  *
  * Supports all input types: keys, dials (rotate/press), pedals, and touch.
  * Includes a blinking red alert system for when Claude needs your response.
+ *
+ * When a SessionTracker is provided, supports multi-session views:
+ * session grid, permission approval, and question views.
  */
 class StreamDeckAdapter extends EventEmitter {
   constructor(bridge, controller, options = {}) {
@@ -25,6 +30,28 @@ class StreamDeckAdapter extends EventEmitter {
     this.alertManager = new AlertManager({
       blinkIntervalMs: options.blinkIntervalMs || 500,
     });
+
+    // Multi-session support
+    this.sessionTracker = options.sessionTracker || null;
+    this.terminalFocuser = options.terminalFocuser || null;
+    this.layoutManager = null;
+
+    // Infobar + touch point LEDs (Neo and devices with infobar/touch strip)
+    this.infobarManager = new InfobarManager(bridge, {
+      maxTokens: options.maxTokens || 200000,
+      gaugeWidth: options.gaugeWidth || 15,
+      ledOverrides: options.ledOverrides || null,
+    });
+
+    if (this.sessionTracker) {
+      this.layoutManager = new LayoutManager({
+        layout: this.layout,
+        device: options.device || { keys: 15, cols: 5 },
+        deckSize: options.deckSize,
+      });
+      this._bindSessionEvents();
+      this._bindLayoutEvents();
+    }
 
     this._initButtonStates();
     this._bindBridgeCommands();
@@ -125,6 +152,18 @@ class StreamDeckAdapter extends EventEmitter {
           case "dismissAlert":
             this._handleDismissAlert(msg.buttonId);
             break;
+          case "updateContext":
+            this.infobarManager.updateContext(msg.tokensUsed, msg.maxTokens);
+            break;
+          case "setTouchPointStyle":
+            this.infobarManager.setTouchPointStyle(msg.style);
+            break;
+          case "setTouchPointLeds":
+            this.infobarManager.setLedOverrides(msg.overrides);
+            break;
+          case "clearTouchPointLeds":
+            this.infobarManager.clearLedOverrides();
+            break;
           default:
             this.bridge.broadcast("error", {
               error: `Unknown action: ${msg.action}`,
@@ -145,6 +184,8 @@ class StreamDeckAdapter extends EventEmitter {
       if (statusAction && statusAction.states && statusAction.states[current]) {
         this._updateButton("status", statusAction.states[current]);
       }
+      // Update touch point LEDs to reflect system state
+      this.infobarManager.onSystemStateChange(current);
     });
 
     this.controller.on("prompt:sent", ({ prompt }) => {
@@ -212,6 +253,103 @@ class StreamDeckAdapter extends EventEmitter {
     });
   }
 
+  // ── Session events binding ─────────────────────────────────
+
+  _bindSessionEvents() {
+    if (!this.sessionTracker) return;
+
+    this.sessionTracker.on("session:added", ({ sessionId }) => {
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (this.layoutManager.currentView === "sessions") {
+        this._refreshAllButtons();
+      }
+    });
+
+    this.sessionTracker.on("session:removed", ({ sessionId }) => {
+      this.alertManager.clearAlert(`session:${sessionId}`);
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (this.layoutManager.currentView === "sessions") {
+        this._refreshAllButtons();
+      }
+      // If we're viewing this session's permission/question, go back
+      if (this.layoutManager.focusedSessionId === sessionId) {
+        this.layoutManager.switchView("sessions");
+        this._refreshAllButtons();
+      }
+    });
+
+    this.sessionTracker.on("session:updated", ({ sessionId, session, event }) => {
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (this.layoutManager.currentView === "sessions") {
+        this._refreshAllButtons();
+      }
+    });
+
+    this.sessionTracker.on("permission:pending", ({ sessionId, tool }) => {
+      this.alertManager.startAlert(`session:${sessionId}`, {
+        reason: "permission",
+        label: sessionId.slice(-4),
+        sublabel: tool ? `${tool}?` : "Permit?",
+        onColor: "#ff6600",
+        offColor: "#331100",
+        icon: "shield",
+      });
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (this.layoutManager.currentView === "sessions") {
+        this._refreshAllButtons();
+      }
+    });
+
+    this.sessionTracker.on("permission:resolved", ({ sessionId }) => {
+      this.alertManager.clearAlert(`session:${sessionId}`);
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      // If we're on the permission view for this session, go back
+      if (
+        this.layoutManager.currentView === "permission" &&
+        this.layoutManager.focusedSessionId === sessionId
+      ) {
+        this.layoutManager.switchView("sessions");
+      }
+      this._refreshAllButtons();
+    });
+
+    this.sessionTracker.on("question:pending", ({ sessionId, message }) => {
+      this.alertManager.startAlert(`session:${sessionId}`, {
+        reason: "question",
+        label: sessionId.slice(-4),
+        sublabel: message ? message.substring(0, 10) : "Question",
+        onColor: "#ffcc00",
+        offColor: "#332200",
+        icon: "clock",
+      });
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (this.layoutManager.currentView === "sessions") {
+        this._refreshAllButtons();
+      }
+    });
+
+    this.sessionTracker.on("question:resolved", ({ sessionId }) => {
+      this.alertManager.clearAlert(`session:${sessionId}`);
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (
+        this.layoutManager.currentView === "question" &&
+        this.layoutManager.focusedSessionId === sessionId
+      ) {
+        this.layoutManager.switchView("sessions");
+      }
+      this._refreshAllButtons();
+    });
+  }
+
+  _bindLayoutEvents() {
+    if (!this.layoutManager) return;
+
+    this.layoutManager.on("view:changed", ({ view }) => {
+      this._refreshAllButtons();
+      this.bridge.broadcast("view:changed", { view });
+    });
+  }
+
   /**
    * Trigger the blinking red RESPOND alert.
    * Called by the HookReceiver when Claude needs user attention.
@@ -248,6 +386,34 @@ class StreamDeckAdapter extends EventEmitter {
   // ── Key handling ──────────────────────────────────────────
 
   async _handleKeyDown(keyIndex) {
+    // Multi-session mode: consult LayoutManager
+    if (this.layoutManager) {
+      const context = this.layoutManager.getActionContext(keyIndex);
+      if (!context) return;
+
+      const action = this._resolveAction(context.actionId);
+      if (!action) return;
+
+      // Flash the button
+      if (!this.alertManager.isAlerting(context.actionId)) {
+        this._updateButton(context.actionId, {
+          ...(this._buttonStates[context.actionId] || action.defaultState),
+          color: "#ffffff",
+        });
+        setTimeout(() => {
+          this._updateButton(
+            context.actionId,
+            this._buttonStates[context.actionId] || action.defaultState
+          );
+        }, 150);
+      }
+
+      await this._executeAction(action, context.actionId, context);
+      this.emit("keyDown", { keyIndex, actionId: context.actionId });
+      return;
+    }
+
+    // Legacy single-session mode
     const actionId = this.layout.keys && this.layout.keys[keyIndex];
     if (!actionId) return;
 
@@ -365,7 +531,7 @@ class StreamDeckAdapter extends EventEmitter {
 
   // ── Shared action execution ───────────────────────────────
 
-  async _executeAction(action, actionId) {
+  async _executeAction(action, actionId, context) {
     switch (action.handler) {
       case "sendPrompt": {
         const prompt =
@@ -401,8 +567,216 @@ class StreamDeckAdapter extends EventEmitter {
       case "dismissAlert":
         this._handleDismissAlert(actionId);
         break;
+
+      // ── Multi-session handlers ───────────────────────────
+      case "focusSession":
+        this._handleFocusSession(context);
+        break;
+      case "permissionDecision":
+        this._handlePermissionDecision(context);
+        break;
+      case "navigateBack":
+        this._handleNavigateBack();
+        break;
+      case "showSessions":
+        this._handleShowSessions();
+        break;
+      case "focusTerminal":
+        this._handleFocusTerminal(context);
+        break;
+      case "prevPage":
+        if (this.layoutManager) {
+          this.layoutManager.prevPage();
+          this._refreshAllButtons();
+        }
+        break;
+      case "nextPage":
+        if (this.layoutManager) {
+          this.layoutManager.nextPage();
+          this._refreshAllButtons();
+        }
+        break;
     }
   }
+
+  // ── Multi-session action handlers ──────────────────────────
+
+  _handleFocusSession(context) {
+    if (!context || !context.sessionId || !this.sessionTracker || !this.layoutManager) return;
+
+    const session = this.sessionTracker.getSession(context.sessionId);
+    if (!session) return;
+
+    if (session.pendingPermission) {
+      this.layoutManager.switchView("permission", { sessionId: context.sessionId });
+    } else if (session.pendingQuestion) {
+      this.layoutManager.switchView("question", { sessionId: context.sessionId });
+    } else {
+      // No pending action — just focus the terminal
+      this._handleFocusTerminal(context);
+    }
+  }
+
+  _handlePermissionDecision(context) {
+    if (!context || !this.sessionTracker || !this.layoutManager) return;
+
+    const sessionId = this.layoutManager.focusedSessionId;
+    if (!sessionId) return;
+
+    const decision = context.meta?.decision;
+    if (!decision) return;
+
+    if (decision === "allowSession") {
+      const session = this.sessionTracker.getSession(sessionId);
+      if (session?.pendingPermission) {
+        this.sessionTracker.addSessionApproval(sessionId, session.pendingPermission.tool);
+      }
+      this.sessionTracker.resolvePendingPermission(sessionId, "allow");
+    } else if (decision === "allow") {
+      this.sessionTracker.resolvePendingPermission(sessionId, "allow");
+    } else if (decision === "deny") {
+      this.sessionTracker.resolvePendingPermission(sessionId, "deny", "denied by user");
+    }
+
+    // Navigate back to sessions
+    this.layoutManager.switchView("sessions");
+    this._refreshAllButtons();
+  }
+
+  _handleNavigateBack() {
+    if (!this.layoutManager) return;
+
+    const current = this.layoutManager.currentView;
+    if (current === "permission" || current === "question") {
+      this.layoutManager.switchView("sessions");
+    } else if (current === "sessions") {
+      this.layoutManager.switchView("default");
+    }
+    this._refreshAllButtons();
+  }
+
+  _handleShowSessions() {
+    if (!this.layoutManager) return;
+    this.layoutManager.switchView("sessions");
+    this._refreshAllButtons();
+  }
+
+  async _handleFocusTerminal(context) {
+    if (!this.terminalFocuser) return;
+
+    const sessionId = context?.sessionId || this.layoutManager?.focusedSessionId;
+    if (!sessionId) return;
+
+    await this.terminalFocuser.focus({ sessionId });
+  }
+
+  // ── Refresh all buttons for current view ───────────────────
+
+  _refreshAllButtons() {
+    if (!this.layoutManager) return;
+
+    const layout = this.layoutManager.getCurrentLayout();
+    const totalKeys = (this.layoutManager._device || {}).keys || 15;
+
+    // Clear all keys first
+    for (let i = 0; i < totalKeys; i++) {
+      const context = layout.keys[i];
+      if (!context) {
+        // Empty key
+        this._updateButton(`_key_${i}`, {
+          label: "",
+          color: "#000000",
+        });
+        this.bridge.broadcast("button:render", {
+          buttonId: `_key_${i}`,
+          keyIndex: i,
+          state: { label: "", color: "#000000" },
+          svg: this.renderer.render({ label: "", color: "#000000" }),
+        });
+        continue;
+      }
+
+      const actionId = context.actionId;
+      const action = this._resolveAction(actionId);
+      if (!action) continue;
+
+      let state = { ...action.defaultState };
+
+      // Dynamic state for session buttons
+      if (actionId === "sessionButton" && context.meta?.session) {
+        const session = context.meta.session;
+        state = this._sessionButtonState(session);
+      }
+
+      // Dynamic state for permission info
+      if (actionId === "permissionInfo" && this.layoutManager.focusedSessionId) {
+        const session = this.sessionTracker?.getSession(this.layoutManager.focusedSessionId);
+        if (session?.pendingPermission) {
+          state = {
+            label: session.pendingPermission.tool || "TOOL",
+            color: "#ff6600",
+            icon: "shield",
+            sublabel: `Session ${session.label}`,
+          };
+        } else if (session?.pendingQuestion) {
+          state = {
+            label: "QUESTION",
+            color: "#ffcc00",
+            icon: "clock",
+            sublabel: session.pendingQuestion.message
+              ? session.pendingQuestion.message.substring(0, 12)
+              : "",
+          };
+        }
+      }
+
+      this._buttonStates[actionId] = state;
+      const svg = this.renderer.render(state);
+      this.bridge.updateButton(actionId, state);
+      this.bridge.broadcast("button:render", {
+        buttonId: actionId,
+        keyIndex: i,
+        state,
+        svg,
+      });
+    }
+  }
+
+  _sessionButtonState(session) {
+    const label = session.label || "SESS";
+    if (session.pendingPermission) {
+      return {
+        label,
+        color: "#ff6600",
+        icon: "shield",
+        sublabel: session.pendingPermission.tool || "Permit?",
+      };
+    }
+    if (session.pendingQuestion) {
+      return {
+        label,
+        color: "#ffcc00",
+        icon: "clock",
+        sublabel: "Question",
+      };
+    }
+    const statusColors = {
+      active: "#00cc66",
+      tool: "#9966ff",
+      waiting: "#ffcc00",
+      attention: "#ffcc00",
+      permission: "#ff6600",
+      offline: "#333333",
+    };
+    return {
+      label,
+      color: statusColors[session.status] || "#444444",
+      icon: "circle",
+      sublabel: session.currentTool || session.status || "",
+    };
+  }
+
+  // ── Original helpers ───────────────────────────────────────
 
   _handleDismissAlert(buttonId) {
     const id = buttonId || "respondAlert";
@@ -462,6 +836,18 @@ class StreamDeckAdapter extends EventEmitter {
     const status = this.controller.getStatus();
     status.alerting = this.alertManager.hasActiveAlerts;
     status.activeAlerts = this.alertManager.activeAlerts;
+    if (this.sessionTracker) {
+      status.sessions = this.sessionTracker.getAllSessions().map((s) => ({
+        sessionId: s.sessionId,
+        status: s.status,
+        label: s.label,
+        hasPendingPermission: !!s.pendingPermission,
+        hasPendingQuestion: !!s.pendingQuestion,
+      }));
+    }
+    if (this.layoutManager) {
+      status.currentView = this.layoutManager.currentView;
+    }
     this.bridge.broadcast("status:response", status);
   }
 

@@ -4,9 +4,11 @@ const ClaudeCodeController = require("../src/controller/ClaudeCodeController");
 const BridgeServer = require("../src/bridge/BridgeServer");
 const HookReceiver = require("../src/hooks/HookReceiver");
 const StreamDeckAdapter = require("../src/streamdeck/StreamDeckAdapter");
+const SessionTracker = require("../src/session/SessionTracker");
+const TerminalFocuser = require("../src/session/TerminalFocuser");
 const { installHooks, uninstallHooks } = require("../src/hooks/installHooks");
 const { listActions, listCategories, LAYOUTS, createCustomAction } = require("../src/streamdeck/actions");
-const { listDevices, describeDevice } = require("../src/streamdeck/devices");
+const { listDevices, describeDevice, getDevice } = require("../src/streamdeck/devices");
 const ConfigManager = require("../src/config/ConfigManager");
 
 const [,, command, ...args] = process.argv;
@@ -71,18 +73,46 @@ async function startServer() {
     }
   }
 
+  // Multi-session support
+  const sessionTracker = new SessionTracker();
+  const terminalFocuser = new TerminalFocuser();
+  const device = getDevice(deckSize) || { keys: 15, cols: 5 };
+
   const adapter = new StreamDeckAdapter(bridge, controller, {
     deckSize,
     layout,
     customActions,
+    sessionTracker,
+    terminalFocuser,
+    device,
   });
 
   // Wire hooks to adapter so alerts trigger on attention-needed events
-  const hooks = new HookReceiver(bridge, { adapter });
+  const hooks = new HookReceiver(bridge, { adapter, sessionTracker });
 
   // Log hook events
   hooks.on("hook", (event) => {
-    console.log(`[hook] ${event.event}${event.tool ? ` (${event.tool})` : ""}`);
+    console.log(`[hook] ${event.event}${event.tool ? ` (${event.tool})` : ""}${event.sessionId ? ` [${event.sessionId.slice(-4)}]` : ""}`);
+  });
+
+  // Log session events
+  sessionTracker.on("session:added", ({ sessionId }) => {
+    console.log(`[session] Added: ${sessionId.slice(-4)} (${sessionTracker.sessionCount} active)`);
+  });
+  sessionTracker.on("session:removed", ({ sessionId }) => {
+    console.log(`[session] Removed: ${sessionId.slice(-4)} (${sessionTracker.sessionCount} active)`);
+  });
+  sessionTracker.on("permission:pending", ({ sessionId, tool }) => {
+    console.log(`[PERMISSION] Session ${sessionId.slice(-4)} awaiting approval for: ${tool}`);
+  });
+  sessionTracker.on("permission:resolved", ({ sessionId, decision }) => {
+    console.log(`[permission] Session ${sessionId.slice(-4)} -> ${decision}`);
+  });
+  sessionTracker.on("question:pending", ({ sessionId }) => {
+    console.log(`[QUESTION] Session ${sessionId.slice(-4)} waiting for response`);
+  });
+  sessionTracker.on("question:resolved", ({ sessionId }) => {
+    console.log(`[question] Session ${sessionId.slice(-4)} question resolved`);
   });
 
   controller.on("status:change", ({ previous, current }) => {
@@ -115,7 +145,7 @@ async function startServer() {
 
   await bridge.start();
 
-  const device = config.getDevice();
+  const deviceInfo = config.getDevice();
   const layoutName = layout.name || deckSize;
   console.log(`
 ┌─────────────────────────────────────────────────┐
@@ -123,11 +153,12 @@ async function startServer() {
 ├─────────────────────────────────────────────────┤
 │  Server:    http://127.0.0.1:${String(port).padEnd(21)}│
 │  WebSocket: ws://127.0.0.1:${String(port).padEnd(23)}│
-│  Device:    ${device.name.padEnd(37)}│
+│  Device:    ${deviceInfo.name.padEnd(37)}│
 │  Layout:    ${layoutName.substring(0, 37).padEnd(37)}│
 │  CWD:       ${workingDir.substring(0, 37).padEnd(37)}│
 ├─────────────────────────────────────────────────┤
-│  Inputs: ${String(device.keys || 0).padStart(2)} keys, ${String(device.dials || 0)} dials, ${String(device.pedals || 0)} pedals${" ".repeat(11)}│
+│  Inputs: ${String(deviceInfo.keys || 0).padStart(2)} keys, ${String(deviceInfo.dials || 0)} dials, ${String(deviceInfo.pedals || 0)} pedals${" ".repeat(11)}│
+│  Multi-session: enabled                        │
 ├─────────────────────────────────────────────────┤
 │  Hook endpoints:                                │
 │    POST /hooks/notification                     │
@@ -143,6 +174,7 @@ async function startServer() {
 
   process.on("SIGINT", async () => {
     console.log("\nShutting down...");
+    sessionTracker.destroy();
     await bridge.stop();
     process.exit(0);
   });
