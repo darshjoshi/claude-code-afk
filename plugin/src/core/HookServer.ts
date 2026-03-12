@@ -54,7 +54,9 @@ export class HookServer {
   stop(): Promise<void> {
     return new Promise((resolve) => {
       if (this._server) {
-        this._server.close(() => resolve());
+        const server = this._server;
+        this._server = null;
+        server.close(() => resolve());
       } else {
         resolve();
       }
@@ -62,11 +64,12 @@ export class HookServer {
   }
 
   private _handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
-    const key = `${req.method} ${req.url}`;
+    const urlPath = (req.url || "").split("?")[0];
+    const key = `${req.method} ${urlPath}`;
     const handler = this._routes.get(key);
 
     // CORS
-    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 

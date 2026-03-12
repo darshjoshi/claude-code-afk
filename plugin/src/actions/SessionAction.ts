@@ -10,7 +10,10 @@ export function setSessionCore(c: PluginCore): void {
 @action({ UUID: "com.claude.code-control.session" })
 export class SessionAction extends SingletonAction {
   override async onWillAppear(ev: WillAppearEvent): Promise<void> {
-    core.registerInstance(ev.action as any, "sessionButton", ev as any);
+    const coords = (ev.payload as any).coordinates;
+    const cols = 5;
+    const keyIndex = coords ? (coords.row * cols + coords.column) : -1;
+    core.registerInstance(ev.action as any, "sessionButton", ev as any, keyIndex);
   }
 
   override async onWillDisappear(ev: WillDisappearEvent): Promise<void> {
@@ -19,8 +22,9 @@ export class SessionAction extends SingletonAction {
 
   override async onKeyDown(ev: KeyDownEvent): Promise<void> {
     const layout = core.layoutManager.getCurrentLayout();
-    const slotIndex = (ev.payload.settings.slotIndex as number) ?? 0;
-    const context = layout.keys[slotIndex];
+    const instance = core.getInstance(ev.action.id);
+    if (!instance) return;
+    const context = layout.keys[instance.keyIndex];
     if (context) {
       await core.executeAction(context.actionId, context);
     }

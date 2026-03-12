@@ -30,6 +30,7 @@ interface ActionInstance {
   deviceId: string;
   context: string;
   isEncoder: boolean;
+  keyIndex: number;
 }
 
 /**
@@ -102,6 +103,9 @@ export class PluginCore extends EventEmitter {
       sessionTracker: this.sessionTracker,
     });
 
+    // Wire adapter so HookReceiver can trigger alerts and update context gauge
+    this.hookReceiver.setAdapter(this);
+
     // Wire events
     this._bindBroadcastEvents();
     this._bindAlertEvents();
@@ -133,14 +137,15 @@ export class PluginCore extends EventEmitter {
   /**
    * Register an SDK action instance when it appears on the Stream Deck.
    */
-  registerInstance(sdAction: any, actionId: string, ev: any): void {
-    const context = ev.action.id + ":" + (ev.context ?? Math.random().toString(36).slice(2));
+  registerInstance(sdAction: any, actionId: string, ev: any, keyIndex?: number): void {
+    const context = ev.action.id;
     const instance: ActionInstance = {
       sdAction,
       actionId,
       deviceId: ev.device ?? "",
       context,
       isEncoder: typeof ev.action.isEncoder === "function" ? ev.action.isEncoder() : false,
+      keyIndex: keyIndex ?? -1,
     };
     this._instances.set(context, instance);
 
@@ -156,8 +161,37 @@ export class PluginCore extends EventEmitter {
    * Unregister an SDK action instance when it disappears.
    */
   unregisterInstance(sdAction: any, ev: any): void {
-    const context = ev.action.id + ":" + (ev.context ?? "");
+    const context = ev.action.id;
     this._instances.delete(context);
+  }
+
+  /**
+   * Get a registered instance by its context ID.
+   */
+  getInstance(contextId: string): ActionInstance | undefined {
+    return this._instances.get(contextId);
+  }
+
+  /**
+   * Trigger the respond alert (called by HookReceiver adapter).
+   */
+  triggerRespondAlert(reason: string, sublabel?: string): void {
+    const action = getAction("respondAlert");
+    if (action?.alertState) {
+      this.alertManager.startAlert("respondAlert", {
+        reason,
+        sublabel: sublabel || action.alertState.label,
+        ...action.alertState,
+      });
+    }
+  }
+
+  /**
+   * Dismiss the respond alert (called by HookReceiver adapter).
+   */
+  dismissRespondAlert(): void {
+    this.alertManager.clearAlert("respondAlert");
+    this._resetRespondButton();
   }
 
   // ── Action execution ──────────────────────────────────────────
@@ -293,7 +327,7 @@ export class PluginCore extends EventEmitter {
 
   private _bindBroadcastEvents(): void {
     this.bridge.on("broadcast", (msg: any) => {
-      const { type, ...data } = msg;
+      const { type, data } = msg;
 
       switch (type) {
         case "button:update":
@@ -669,14 +703,12 @@ export class PluginCore extends EventEmitter {
       keyStates[i] = { actionId, state };
     }
 
-    // Now push images to all session-type instances based on position
-    // For non-session views, match by actionId
+    // Push to instances by keyIndex
     for (const instance of this._instances.values()) {
-      const matchingKey = Object.entries(keyStates).find(
-        ([, ks]) => ks.actionId === instance.actionId
-      );
-      if (matchingKey) {
-        this._renderInstance(instance, matchingKey[1].state);
+      if (instance.isEncoder) continue;
+      const ks = keyStates[instance.keyIndex];
+      if (ks) {
+        this._renderInstance(instance, ks.state);
       }
     }
   }

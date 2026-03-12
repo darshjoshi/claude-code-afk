@@ -11,7 +11,10 @@ export function setControlCore(c: PluginCore): void {
 export class ControlAction extends SingletonAction {
   override async onWillAppear(ev: WillAppearEvent): Promise<void> {
     const actionId = (ev.payload.settings.actionId as string) || "abort";
-    core.registerInstance(ev.action as any, actionId, ev as any);
+    const coords = (ev.payload as any).coordinates;
+    const cols = 5;
+    const keyIndex = coords ? (coords.row * cols + coords.column) : -1;
+    core.registerInstance(ev.action as any, actionId, ev as any, keyIndex);
   }
 
   override async onWillDisappear(ev: WillDisappearEvent): Promise<void> {

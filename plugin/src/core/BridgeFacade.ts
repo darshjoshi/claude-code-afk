@@ -39,7 +39,7 @@ export class BridgeFacade extends EventEmitter {
    * emits a local event that PluginCore listens to.
    */
   broadcast(type: string, data: any): void {
-    this.emit("broadcast", { type, ...data });
+    this.emit("broadcast", { type, data });
   }
 
   /**

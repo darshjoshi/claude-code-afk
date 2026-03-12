@@ -7138,7 +7138,9 @@ class HookServer {
     stop() {
         return new Promise((resolve) => {
             if (this._server) {
-                this._server.close(() => resolve());
+                const server = this._server;
+                this._server = null;
+                server.close(() => resolve());
             }
             else {
                 resolve();
@@ -7146,10 +7148,11 @@ class HookServer {
         });
     }
     _handleRequest(req, res) {
-        const key = `${req.method} ${req.url}`;
+        const urlPath = (req.url || "").split("?")[0];
+        const key = `${req.method} ${urlPath}`;
         const handler = this._routes.get(key);
         // CORS
-        res.setHeader("Access-Control-Allow-Origin", "*");
+        res.setHeader("Access-Control-Allow-Origin", "http://127.0.0.1");
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         res.setHeader("Access-Control-Allow-Headers", "Content-Type");
         if (req.method === "OPTIONS") {
@@ -7217,7 +7220,7 @@ class BridgeFacade extends EventEmitter$8 {
      * emits a local event that PluginCore listens to.
      */
     broadcast(type, data) {
-        this.emit("broadcast", { type, ...data });
+        this.emit("broadcast", { type, data });
     }
     /**
      * Update shared state and emit broadcast.
@@ -10277,6 +10280,8 @@ class PluginCore extends EventEmitter$8 {
         this.hookReceiver = new HookReceiver$1(this.bridge, {
             sessionTracker: this.sessionTracker,
         });
+        // Wire adapter so HookReceiver can trigger alerts and update context gauge
+        this.hookReceiver.setAdapter(this);
         // Wire events
         this._bindBroadcastEvents();
         this._bindAlertEvents();
@@ -10304,14 +10309,15 @@ class PluginCore extends EventEmitter$8 {
     /**
      * Register an SDK action instance when it appears on the Stream Deck.
      */
-    registerInstance(sdAction, actionId, ev) {
-        const context = ev.action.id + ":" + (ev.context ?? Math.random().toString(36).slice(2));
+    registerInstance(sdAction, actionId, ev, keyIndex) {
+        const context = ev.action.id;
         const instance = {
             sdAction,
             actionId,
             deviceId: ev.device ?? "",
             context,
             isEncoder: typeof ev.action.isEncoder === "function" ? ev.action.isEncoder() : false,
+            keyIndex: keyIndex ?? -1,
         };
         this._instances.set(context, instance);
         // Render initial state
@@ -10325,8 +10331,34 @@ class PluginCore extends EventEmitter$8 {
      * Unregister an SDK action instance when it disappears.
      */
     unregisterInstance(sdAction, ev) {
-        const context = ev.action.id + ":" + (ev.context ?? "");
+        const context = ev.action.id;
         this._instances.delete(context);
+    }
+    /**
+     * Get a registered instance by its context ID.
+     */
+    getInstance(contextId) {
+        return this._instances.get(contextId);
+    }
+    /**
+     * Trigger the respond alert (called by HookReceiver adapter).
+     */
+    triggerRespondAlert(reason, sublabel) {
+        const action = actions.getAction("respondAlert");
+        if (action?.alertState) {
+            this.alertManager.startAlert("respondAlert", {
+                reason,
+                sublabel: sublabel || action.alertState.label,
+                ...action.alertState,
+            });
+        }
+    }
+    /**
+     * Dismiss the respond alert (called by HookReceiver adapter).
+     */
+    dismissRespondAlert() {
+        this.alertManager.clearAlert("respondAlert");
+        this._resetRespondButton();
     }
     // ── Action execution ──────────────────────────────────────────
     /**
@@ -10455,7 +10487,7 @@ class PluginCore extends EventEmitter$8 {
     // ── Internal: broadcast event handling ────────────────────────
     _bindBroadcastEvents() {
         this.bridge.on("broadcast", (msg) => {
-            const { type, ...data } = msg;
+            const { type, data } = msg;
             switch (type) {
                 case "button:update":
                     this._onButtonUpdate(data.buttonId, data.state);
@@ -10796,12 +10828,13 @@ class PluginCore extends EventEmitter$8 {
             this._buttonStates[actionId] = state;
             keyStates[i] = { actionId, state };
         }
-        // Now push images to all session-type instances based on position
-        // For non-session views, match by actionId
+        // Push to instances by keyIndex
         for (const instance of this._instances.values()) {
-            const matchingKey = Object.entries(keyStates).find(([, ks]) => ks.actionId === instance.actionId);
-            if (matchingKey) {
-                this._renderInstance(instance, matchingKey[1].state);
+            if (instance.isEncoder)
+                continue;
+            const ks = keyStates[instance.keyIndex];
+            if (ks) {
+                this._renderInstance(instance, ks.state);
             }
         }
     }
@@ -10848,7 +10881,10 @@ function setStatusCore(c) {
 class StatusAction extends SingletonAction {
     async onWillAppear(ev) {
         const actionId = ev.payload.settings.actionId || "status";
-        core$7.registerInstance(ev.action, actionId, ev);
+        const coords = ev.payload.coordinates;
+        const cols = 5;
+        const keyIndex = coords ? (coords.row * cols + coords.column) : -1;
+        core$7.registerInstance(ev.action, actionId, ev, keyIndex);
     }
     async onWillDisappear(ev) {
         core$7.unregisterInstance(ev.action, ev);
@@ -10873,7 +10909,10 @@ function setPromptCore(c) {
 class PromptAction extends SingletonAction {
     async onWillAppear(ev) {
         const actionId = ev.payload.settings.actionId || "reviewCode";
-        core$6.registerInstance(ev.action, actionId, ev);
+        const coords = ev.payload.coordinates;
+        const cols = 5;
+        const keyIndex = coords ? (coords.row * cols + coords.column) : -1;
+        core$6.registerInstance(ev.action, actionId, ev, keyIndex);
     }
     async onWillDisappear(ev) {
         core$6.unregisterInstance(ev.action, ev);
@@ -10896,7 +10935,10 @@ function setControlCore(c) {
 class ControlAction extends SingletonAction {
     async onWillAppear(ev) {
         const actionId = ev.payload.settings.actionId || "abort";
-        core$5.registerInstance(ev.action, actionId, ev);
+        const coords = ev.payload.coordinates;
+        const cols = 5;
+        const keyIndex = coords ? (coords.row * cols + coords.column) : -1;
+        core$5.registerInstance(ev.action, actionId, ev, keyIndex);
     }
     async onWillDisappear(ev) {
         core$5.unregisterInstance(ev.action, ev);
@@ -10918,15 +10960,20 @@ function setSessionCore(c) {
 @action({ UUID: "com.claude.code-control.session" })
 class SessionAction extends SingletonAction {
     async onWillAppear(ev) {
-        core$4.registerInstance(ev.action, "sessionButton", ev);
+        const coords = ev.payload.coordinates;
+        const cols = 5;
+        const keyIndex = coords ? (coords.row * cols + coords.column) : -1;
+        core$4.registerInstance(ev.action, "sessionButton", ev, keyIndex);
     }
     async onWillDisappear(ev) {
         core$4.unregisterInstance(ev.action, ev);
     }
     async onKeyDown(ev) {
         const layout = core$4.layoutManager.getCurrentLayout();
-        const slotIndex = ev.payload.settings.slotIndex ?? 0;
-        const context = layout.keys[slotIndex];
+        const instance = core$4.getInstance(ev.action.id);
+        if (!instance)
+            return;
+        const context = layout.keys[instance.keyIndex];
         if (context) {
             await core$4.executeAction(context.actionId, context);
         }
