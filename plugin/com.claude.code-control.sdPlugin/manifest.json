@@ -1,0 +1,144 @@
+{
+  "Name": "Claude Code Control",
+  "Version": "1.0.0",
+  "Author": "Claude Code",
+  "Description": "Control Claude Code from your Stream Deck. Send prompts, manage permissions, monitor context usage, and handle multi-session workflows.",
+  "Category": "Claude Code",
+  "CategoryIcon": "imgs/category",
+  "Icon": "imgs/plugin-icon",
+  "URL": "https://github.com/anthropics/claude-code",
+  "SDKVersion": 2,
+  "OS": [
+    { "Platform": "mac", "MinimumVersion": "10.15" },
+    { "Platform": "windows", "MinimumVersion": "10" }
+  ],
+  "Software": {
+    "MinimumVersion": "6.4"
+  },
+  "NodeVersion": "20",
+  "Actions": [
+    {
+      "Name": "Claude Status",
+      "UUID": "com.claude.code-control.status",
+      "Icon": "imgs/actions/status/icon",
+      "Tooltip": "Shows Claude Code status and alerts when attention is needed",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/actions/status/key",
+          "TitleAlignment": "middle",
+          "FontSize": "16"
+        }
+      ],
+      "PropertyInspectorPath": "ui/status-pi.html",
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Claude Prompt",
+      "UUID": "com.claude.code-control.prompt",
+      "Icon": "imgs/actions/prompt/icon",
+      "Tooltip": "Send a predefined or custom prompt to Claude Code",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/actions/prompt/key",
+          "TitleAlignment": "middle",
+          "FontSize": "16"
+        }
+      ],
+      "PropertyInspectorPath": "ui/prompt-pi.html",
+      "SupportedInMultiActions": true
+    },
+    {
+      "Name": "Claude Control",
+      "UUID": "com.claude.code-control.control",
+      "Icon": "imgs/actions/control/icon",
+      "Tooltip": "Control actions: abort, new session, compact, navigate views, manage permissions",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/actions/control/key",
+          "TitleAlignment": "middle",
+          "FontSize": "16"
+        }
+      ],
+      "PropertyInspectorPath": "ui/control-pi.html",
+      "SupportedInMultiActions": true
+    },
+    {
+      "Name": "Session Button",
+      "UUID": "com.claude.code-control.session",
+      "Icon": "imgs/actions/session/icon",
+      "Tooltip": "Dynamic session grid button — shows session status, press to manage",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/actions/session/key",
+          "TitleAlignment": "middle",
+          "FontSize": "16"
+        }
+      ],
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Claude Encoder",
+      "UUID": "com.claude.code-control.encoder",
+      "Icon": "imgs/actions/encoder/icon",
+      "Tooltip": "Rotary encoder for scroll, model select, volume, and max turns",
+      "Controllers": ["Encoder"],
+      "States": [
+        {
+          "TitleAlignment": "middle",
+          "FontSize": "12"
+        }
+      ],
+      "Encoder": {
+        "layout": "$B1",
+        "TriggerDescription": {
+          "Rotate": "Adjust value",
+          "Push": "Confirm / Reset",
+          "Touch": "Toggle"
+        }
+      },
+      "PropertyInspectorPath": "ui/encoder-pi.html",
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Context Gauge",
+      "UUID": "com.claude.code-control.context-gauge",
+      "Icon": "imgs/actions/gauge/icon",
+      "Tooltip": "LCD strip showing context window usage with color-coded gauge",
+      "Controllers": ["Encoder"],
+      "States": [
+        {
+          "TitleAlignment": "middle",
+          "FontSize": "12"
+        }
+      ],
+      "Encoder": {
+        "layout": "layouts/context-gauge.json",
+        "TriggerDescription": {
+          "Rotate": "No action",
+          "Push": "Refresh",
+          "Touch": "Toggle details"
+        }
+      },
+      "SupportedInMultiActions": false
+    },
+    {
+      "Name": "Claude Pedal",
+      "UUID": "com.claude.code-control.pedal",
+      "Icon": "imgs/actions/pedal/icon",
+      "Tooltip": "Foot pedal actions: abort, accept permission, push-to-talk",
+      "Controllers": ["Keypad"],
+      "States": [
+        {
+          "Image": "imgs/actions/pedal/key",
+          "TitleAlignment": "middle",
+          "FontSize": "16"
+        }
+      ],
+      "SupportedInMultiActions": false
+    }
+  ]
+}
