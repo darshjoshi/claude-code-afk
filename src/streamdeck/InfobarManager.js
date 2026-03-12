@@ -4,18 +4,13 @@ const { getAction, getTouchPointStyle } = require("./actions");
 /**
  * Manages the Neo infobar display and touch point LED colors.
  *
- * The infobar shows a context window usage gauge:
- *   ████████░░░░░░░ 54% (108k/200k)
- *
- * Touch point LEDs change color based on system state:
- *   - Idle: dim blue
- *   - Active: green
- *   - Permission needed: orange (blinking)
- *   - Waiting for input: yellow
- *   - Context critical: red
- *
- * Context data is extracted from hook payloads when available,
- * or can be updated directly via updateContext().
+ * Features:
+ *   - Context window gauge with color-coded thresholds
+ *   - Dynamic LED colors that react to system state
+ *   - Animation patterns: breathing, pulse, rainbow, chase, flash
+ *   - Per-session LED colors (different colors per session needing attention)
+ *   - Custom state-to-color mapping (user-configurable)
+ *   - Persistent LED preferences via config
  */
 class InfobarManager extends EventEmitter {
   constructor(bridge, options = {}) {
@@ -26,17 +21,46 @@ class InfobarManager extends EventEmitter {
     this._percent = 0;
     this._gaugeWidth = options.gaugeWidth || 15;
     this._touchPointStyle = "idle";
-    this._blinkTimer = null;
+    this._animationTimer = null;
+    this._animationFrame = 0;
     this._blinkState = false;
 
     // Custom LED overrides (user config)
     this._ledOverrides = options.ledOverrides || null;
+
+    // Custom state-to-style mapping (user can remap which colors appear for which states)
+    this._stateStyleMap = Object.assign(
+      {
+        idle: "idle",
+        offline: "idle",
+        active: "active",
+        running: "active",
+        waiting: "waiting",
+        permission: "permission",
+        attention: "attention",
+      },
+      options.stateStyleMap || {}
+    );
+
+    // Session color palette — each concurrent session gets a unique color
+    this._sessionColorPalette = options.sessionColorPalette || [
+      "#ff6600", // orange
+      "#cc00ff", // purple
+      "#00ccff", // cyan
+      "#ff0066", // pink
+      "#66ff00", // lime
+      "#ffcc00", // gold
+      "#0066ff", // blue
+      "#ff3300", // red-orange
+    ];
+    this._sessionColorMap = new Map(); // sessionId -> color
+    this._nextColorIndex = 0;
   }
+
+  // ── Context gauge ──────────────────────────────────────────
 
   /**
    * Update context window usage.
-   * @param {number} tokensUsed - Current tokens in context
-   * @param {number} [maxTokens] - Max context window size (optional override)
    */
   updateContext(tokensUsed, maxTokens) {
     if (maxTokens) this._maxTokens = maxTokens;
@@ -46,7 +70,6 @@ class InfobarManager extends EventEmitter {
     const gauge = this._renderGauge();
     const thresholdColor = this._getThresholdColor();
 
-    // Update the infobar display
     this.bridge.broadcast("infobar:update", {
       actionId: "contextGauge",
       display: gauge,
@@ -72,9 +95,10 @@ class InfobarManager extends EventEmitter {
     });
   }
 
+  // ── Touch point LED styles ─────────────────────────────────
+
   /**
    * Set touch point LED style by name or custom config.
-   * @param {string|object} style - Style name from TOUCH_POINT_STYLES or { left, right } object
    */
   setTouchPointStyle(style) {
     let source;
@@ -111,49 +135,306 @@ class InfobarManager extends EventEmitter {
     this.emit("touchpoint:changed", { style: this._touchPointStyle, resolved });
   }
 
-  /**
-   * Start blinking touch point LEDs (for attention states).
-   * Alternates between the given style and dim/off.
-   */
-  startTouchPointBlink(style, intervalMs = 500) {
-    this.stopTouchPointBlink();
+  // ── Animation patterns ─────────────────────────────────────
 
-    const onStyle = typeof style === "string" ? getTouchPointStyle(style) : style;
+  /**
+   * Start an animation pattern on the touch point LEDs.
+   *
+   * @param {string} pattern - "blink", "breathe", "pulse", "rainbow", "chase", "flash"
+   * @param {object} [options]
+   * @param {string} [options.color] - Primary color (for single-color patterns)
+   * @param {string} [options.style] - Style name to use as the "on" color
+   * @param {number} [options.intervalMs] - Animation speed (default varies by pattern)
+   * @param {number} [options.steps] - Number of animation steps (for smooth patterns)
+   * @param {string[]} [options.colors] - Color list (for rainbow/chase)
+   */
+  startAnimation(pattern, options = {}) {
+    this.stopAnimation();
+
+    switch (pattern) {
+      case "blink":
+        this._animateBlink(options);
+        break;
+      case "breathe":
+        this._animateBreathe(options);
+        break;
+      case "pulse":
+        this._animatePulse(options);
+        break;
+      case "rainbow":
+        this._animateRainbow(options);
+        break;
+      case "chase":
+        this._animateChase(options);
+        break;
+      case "flash":
+        this._animateFlash(options);
+        break;
+      default:
+        // Unknown pattern, fall back to blink
+        this._animateBlink(options);
+    }
+
+    this.emit("animation:started", { pattern, options });
+  }
+
+  /**
+   * Stop any running animation.
+   */
+  stopAnimation() {
+    if (this._animationTimer) {
+      clearInterval(this._animationTimer);
+      this._animationTimer = null;
+    }
+    this._animationFrame = 0;
+  }
+
+  /**
+   * Check if an animation is currently running.
+   */
+  get isAnimating() {
+    return this._animationTimer !== null;
+  }
+
+  // Blink: alternates between on-color and dim
+  _animateBlink(options) {
+    const onStyle = options.style
+      ? getTouchPointStyle(options.style)
+      : options.color
+        ? { left: { color: options.color, brightness: 100 }, right: { color: options.color, brightness: 100 } }
+        : getTouchPointStyle(this._touchPointStyle);
     const offStyle = getTouchPointStyle("dim");
+    const intervalMs = options.intervalMs || 500;
 
     this._blinkState = true;
-    this.setTouchPointStyle(style);
+    this._broadcastLed(onStyle, true);
 
-    this._blinkTimer = setInterval(() => {
+    this._animationTimer = setInterval(() => {
       this._blinkState = !this._blinkState;
-      const current = this._blinkState ? onStyle : offStyle;
-      this.bridge.broadcast("touchpoint:led", {
-        left: current.left,
-        right: current.right,
-        styleName: this._blinkState ? this._touchPointStyle : "dim",
-        blink: true,
-      });
+      this._broadcastLed(this._blinkState ? onStyle : offStyle, true);
     }, intervalMs);
   }
 
-  /**
-   * Stop blinking touch point LEDs.
-   */
-  stopTouchPointBlink() {
-    if (this._blinkTimer) {
-      clearInterval(this._blinkTimer);
-      this._blinkTimer = null;
-    }
+  // Breathe: smooth fade in/out using brightness ramp
+  _animateBreathe(options) {
+    const color = options.color || "#4488ff";
+    const steps = options.steps || 30;
+    const intervalMs = options.intervalMs || 50; // 50ms * 30 steps = 1.5s per cycle
+    this._animationFrame = 0;
+
+    this._animationTimer = setInterval(() => {
+      // Sine wave for smooth breathing: 0 → 100 → 0
+      const phase = (this._animationFrame % (steps * 2)) / steps;
+      const brightness = Math.round(
+        phase <= 1
+          ? phase * 100          // fade in
+          : (2 - phase) * 100    // fade out
+      );
+
+      this._broadcastLed({
+        left: { color, brightness },
+        right: { color, brightness },
+      }, true);
+
+      this._animationFrame++;
+    }, intervalMs);
   }
+
+  // Pulse: quick bright flash then slow fade (like a heartbeat)
+  _animatePulse(options) {
+    const color = options.color || "#cc0000";
+    const steps = options.steps || 20;
+    const intervalMs = options.intervalMs || 40;
+    this._animationFrame = 0;
+
+    this._animationTimer = setInterval(() => {
+      const frame = this._animationFrame % (steps + 10); // 10 frames of rest
+      let brightness;
+
+      if (frame < 3) {
+        // Quick flash up
+        brightness = Math.round((frame / 2) * 100);
+      } else if (frame < steps) {
+        // Slow decay
+        brightness = Math.round(((steps - frame) / steps) * 100);
+      } else {
+        // Rest period
+        brightness = 0;
+      }
+
+      this._broadcastLed({
+        left: { color, brightness },
+        right: { color, brightness },
+      }, true);
+
+      this._animationFrame++;
+    }, intervalMs);
+  }
+
+  // Rainbow: cycle through hue spectrum
+  _animateRainbow(options) {
+    const steps = options.steps || 60;
+    const intervalMs = options.intervalMs || 80;
+    const brightness = options.brightness || 80;
+    this._animationFrame = 0;
+
+    this._animationTimer = setInterval(() => {
+      const hue = (this._animationFrame % steps) / steps;
+      // Offset right LED by half cycle for a nice effect
+      const hueRight = ((this._animationFrame + Math.floor(steps / 2)) % steps) / steps;
+
+      this._broadcastLed({
+        left: { color: hslToHex(hue, 1, 0.5), brightness },
+        right: { color: hslToHex(hueRight, 1, 0.5), brightness },
+      }, true);
+
+      this._animationFrame++;
+    }, intervalMs);
+  }
+
+  // Chase: color bounces left → right → left
+  _animateChase(options) {
+    const colors = options.colors || ["#ff6600", "#4488ff"];
+    const intervalMs = options.intervalMs || 300;
+    this._animationFrame = 0;
+
+    this._animationTimer = setInterval(() => {
+      const frame = this._animationFrame % 4;
+      let left, right;
+
+      switch (frame) {
+        case 0: // Left on, right dim
+          left = { color: colors[0], brightness: 100 };
+          right = { color: colors[0], brightness: 10 };
+          break;
+        case 1: // Both on
+          left = { color: colors[0], brightness: 60 };
+          right = { color: colors[0], brightness: 100 };
+          break;
+        case 2: // Left dim, right on with color 2
+          left = { color: colors[1 % colors.length], brightness: 10 };
+          right = { color: colors[1 % colors.length], brightness: 100 };
+          break;
+        case 3: // Both with color 2
+          left = { color: colors[1 % colors.length], brightness: 100 };
+          right = { color: colors[1 % colors.length], brightness: 60 };
+          break;
+      }
+
+      this._broadcastLed({ left, right }, true);
+      this._animationFrame++;
+    }, intervalMs);
+  }
+
+  // Flash: rapid strobe (use sparingly!)
+  _animateFlash(options) {
+    const color = options.color || "#ffffff";
+    const intervalMs = options.intervalMs || 100;
+    this._animationFrame = 0;
+
+    this._animationTimer = setInterval(() => {
+      const on = this._animationFrame % 2 === 0;
+      this._broadcastLed({
+        left: { color, brightness: on ? 100 : 0 },
+        right: { color, brightness: on ? 100 : 0 },
+      }, true);
+      this._animationFrame++;
+    }, intervalMs);
+  }
+
+  _broadcastLed(style, isAnimation = false) {
+    this.bridge.broadcast("touchpoint:led", {
+      left: style.left,
+      right: style.right,
+      styleName: isAnimation ? "animation" : this._touchPointStyle,
+      animation: isAnimation,
+    });
+  }
+
+  // ── Legacy blink (backward compat) ─────────────────────────
+
+  startTouchPointBlink(style, intervalMs = 500) {
+    this.startAnimation("blink", { style, intervalMs });
+  }
+
+  stopTouchPointBlink() {
+    this.stopAnimation();
+  }
+
+  // ── Per-session LED colors ─────────────────────────────────
+
+  /**
+   * Get or assign a unique color for a session.
+   */
+  getSessionColor(sessionId) {
+    if (!this._sessionColorMap.has(sessionId)) {
+      const color = this._sessionColorPalette[
+        this._nextColorIndex % this._sessionColorPalette.length
+      ];
+      this._sessionColorMap.set(sessionId, color);
+      this._nextColorIndex++;
+    }
+    return this._sessionColorMap.get(sessionId);
+  }
+
+  /**
+   * Set a specific color for a session (user override).
+   */
+  setSessionColor(sessionId, color) {
+    this._sessionColorMap.set(sessionId, color);
+  }
+
+  /**
+   * Remove a session's color assignment.
+   */
+  removeSessionColor(sessionId) {
+    this._sessionColorMap.delete(sessionId);
+  }
+
+  /**
+   * Show a session's assigned color on the LEDs.
+   * Left LED shows the session color, right shows the state color.
+   */
+  showSessionAlert(sessionId, state) {
+    const sessionColor = this.getSessionColor(sessionId);
+    const stateStyleName = this._stateStyleMap[state] || "attention";
+    const stateStyle = getTouchPointStyle(stateStyleName);
+
+    this.startAnimation("blink", {
+      style: {
+        left: { color: sessionColor, brightness: 100 },
+        right: { ...stateStyle.right },
+      },
+      intervalMs: state === "permission" ? 400 : 600,
+    });
+  }
+
+  // ── Custom state-to-style mapping ──────────────────────────
+
+  /**
+   * Override which LED style is used for a given system state.
+   * @param {string} state - System state name
+   * @param {string} styleName - Touch point style name to use
+   */
+  setStateStyle(state, styleName) {
+    this._stateStyleMap[state] = styleName;
+  }
+
+  /**
+   * Get the current state-to-style mapping.
+   */
+  getStateStyleMap() {
+    return { ...this._stateStyleMap };
+  }
+
+  // ── Overrides ──────────────────────────────────────────────
 
   /**
    * Set custom LED colors for the touch points (user preference).
    * These override the dynamic style colors.
-   * @param {object} overrides - { left: { color, brightness }, right: { color, brightness } }
    */
   setLedOverrides(overrides) {
     this._ledOverrides = overrides;
-    // Re-apply current style with new overrides
     this.setTouchPointStyle(this._touchPointStyle);
   }
 
@@ -165,8 +446,10 @@ class InfobarManager extends EventEmitter {
     this.setTouchPointStyle(this._touchPointStyle);
   }
 
+  // ── System state handler ───────────────────────────────────
+
   /**
-   * Update state based on system events (called by adapter).
+   * Update LED state based on system events (called by adapter).
    */
   onSystemStateChange(state) {
     // Don't override context-critical LED state
@@ -176,35 +459,19 @@ class InfobarManager extends EventEmitter {
       return;
     }
 
-    switch (state) {
-      case "idle":
-      case "offline":
-        this.stopTouchPointBlink();
-        this.setTouchPointStyle("idle");
-        break;
-      case "active":
-      case "running":
-        this.stopTouchPointBlink();
-        this.setTouchPointStyle("active");
-        break;
-      case "waiting":
-        this.startTouchPointBlink("waiting");
-        break;
-      case "permission":
-        this.startTouchPointBlink("permission");
-        break;
-      case "attention":
-        this.startTouchPointBlink("attention");
-        break;
-      default:
-        this.stopTouchPointBlink();
-        this.setTouchPointStyle("idle");
+    const styleName = this._stateStyleMap[state] || "idle";
+
+    // Animated states
+    if (state === "waiting" || state === "permission" || state === "attention") {
+      this.startAnimation("blink", { style: styleName, intervalMs: 500 });
+    } else {
+      this.stopAnimation();
+      this.setTouchPointStyle(styleName);
     }
   }
 
-  /**
-   * Get the current gauge state for display.
-   */
+  // ── State ──────────────────────────────────────────────────
+
   getState() {
     return {
       percent: this._percent,
@@ -213,6 +480,9 @@ class InfobarManager extends EventEmitter {
       display: this._renderGauge(),
       color: this._getThresholdColor(),
       touchPointStyle: this._touchPointStyle,
+      isAnimating: this.isAnimating,
+      stateStyleMap: { ...this._stateStyleMap },
+      sessionColors: Object.fromEntries(this._sessionColorMap),
     };
   }
 
@@ -221,7 +491,7 @@ class InfobarManager extends EventEmitter {
   _renderGauge() {
     const filled = Math.round((this._percent / 100) * this._gaugeWidth);
     const empty = this._gaugeWidth - filled;
-    const bar = "█".repeat(filled) + "░".repeat(empty);
+    const bar = "\u2588".repeat(filled) + "\u2591".repeat(empty);
     const tokensStr = this._formatTokens(this._currentTokens);
     const maxStr = this._formatTokens(this._maxTokens);
     return `${bar} ${this._percent}% (${tokensStr}/${maxStr})`;
@@ -250,9 +520,35 @@ class InfobarManager extends EventEmitter {
   }
 
   destroy() {
-    this.stopTouchPointBlink();
+    this.stopAnimation();
     this.removeAllListeners();
   }
 }
 
+// ── Helpers ────────────────────────────────────────────────────
+
+/**
+ * Convert HSL (0-1 range) to hex color string.
+ */
+function hslToHex(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h * 6) % 2) - 1));
+  const m = l - c / 2;
+  let r, g, b;
+
+  const sector = Math.floor(h * 6) % 6;
+  switch (sector) {
+    case 0: r = c; g = x; b = 0; break;
+    case 1: r = x; g = c; b = 0; break;
+    case 2: r = 0; g = c; b = x; break;
+    case 3: r = 0; g = x; b = c; break;
+    case 4: r = x; g = 0; b = c; break;
+    case 5: r = c; g = 0; b = x; break;
+  }
+
+  const toHex = (v) => Math.round((v + m) * 255).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
 module.exports = InfobarManager;
+module.exports.hslToHex = hslToHex;

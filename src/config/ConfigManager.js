@@ -160,6 +160,88 @@ class ConfigManager {
     }
   }
 
+  // ── LED configuration ─────────────────────────────────────
+
+  /**
+   * Get LED configuration.
+   */
+  getLedConfig() {
+    const cfg = this._ensureLoaded();
+    return cfg.leds || {};
+  }
+
+  /**
+   * Set static LED color for a touch point.
+   * @param {string} side - "left" or "right"
+   * @param {string} color - Hex color
+   * @param {number} [brightness] - 0-100
+   */
+  setLedColor(side, color, brightness) {
+    const cfg = this._ensureLoaded();
+    if (!cfg.leds) cfg.leds = {};
+    if (!cfg.leds.overrides) cfg.leds.overrides = {};
+    cfg.leds.overrides[side] = { color };
+    if (brightness !== undefined) {
+      cfg.leds.overrides[side].brightness = brightness;
+    }
+  }
+
+  /**
+   * Clear LED color override for a touch point.
+   * @param {string} [side] - "left", "right", or omit to clear both
+   */
+  clearLedColor(side) {
+    const cfg = this._ensureLoaded();
+    if (!cfg.leds?.overrides) return;
+    if (side) {
+      delete cfg.leds.overrides[side];
+    } else {
+      delete cfg.leds.overrides;
+    }
+  }
+
+  /**
+   * Set which LED style to use for a given system state.
+   * @param {string} state - System state (idle, active, waiting, permission, attention)
+   * @param {string} style - Style name from TOUCH_POINT_STYLES
+   */
+  setLedStateStyle(state, style) {
+    const cfg = this._ensureLoaded();
+    if (!cfg.leds) cfg.leds = {};
+    if (!cfg.leds.stateStyles) cfg.leds.stateStyles = {};
+    cfg.leds.stateStyles[state] = style;
+  }
+
+  /**
+   * Set the default animation pattern for attention states.
+   * @param {string} pattern - "blink", "breathe", "pulse", "rainbow", "chase", "flash"
+   */
+  setLedAnimation(pattern) {
+    const cfg = this._ensureLoaded();
+    if (!cfg.leds) cfg.leds = {};
+    cfg.leds.animation = pattern;
+  }
+
+  /**
+   * Set the session color palette.
+   * @param {string[]} colors - Array of hex colors
+   */
+  setSessionColorPalette(colors) {
+    const cfg = this._ensureLoaded();
+    if (!cfg.leds) cfg.leds = {};
+    cfg.leds.sessionColors = colors;
+  }
+
+  /**
+   * Set a specific session's LED color.
+   */
+  setSessionLedColor(sessionId, color) {
+    const cfg = this._ensureLoaded();
+    if (!cfg.leds) cfg.leds = {};
+    if (!cfg.leds.sessionOverrides) cfg.leds.sessionOverrides = {};
+    cfg.leds.sessionOverrides[sessionId] = color;
+  }
+
   /**
    * Set bridge server options.
    */
@@ -214,6 +296,7 @@ class ConfigManager {
       },
       layout: null, // null = use device default
       customActions: {},
+      leds: null, // null = use dynamic defaults
     };
   }
 }

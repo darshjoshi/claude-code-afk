@@ -41,7 +41,10 @@ class StreamDeckAdapter extends EventEmitter {
       maxTokens: options.maxTokens || 200000,
       gaugeWidth: options.gaugeWidth || 15,
       ledOverrides: options.ledOverrides || null,
+      stateStyleMap: options.stateStyleMap || null,
+      sessionColorPalette: options.sessionColorPalette || null,
     });
+    this._defaultAnimation = options.defaultAnimation || "blink";
 
     if (this.sessionTracker) {
       this.layoutManager = new LayoutManager({
@@ -164,6 +167,18 @@ class StreamDeckAdapter extends EventEmitter {
           case "clearTouchPointLeds":
             this.infobarManager.clearLedOverrides();
             break;
+          case "startAnimation":
+            this.infobarManager.startAnimation(msg.pattern, msg.options || {});
+            break;
+          case "stopAnimation":
+            this.infobarManager.stopAnimation();
+            break;
+          case "setSessionColor":
+            this.infobarManager.setSessionColor(msg.sessionId, msg.color);
+            break;
+          case "setStateStyle":
+            this.infobarManager.setStateStyle(msg.state, msg.style);
+            break;
           default:
             this.bridge.broadcast("error", {
               error: `Unknown action: ${msg.action}`,
@@ -267,6 +282,7 @@ class StreamDeckAdapter extends EventEmitter {
 
     this.sessionTracker.on("session:removed", ({ sessionId }) => {
       this.alertManager.clearAlert(`session:${sessionId}`);
+      this.infobarManager.removeSessionColor(sessionId);
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
       if (this.layoutManager.currentView === "sessions") {
         this._refreshAllButtons();
@@ -286,14 +302,18 @@ class StreamDeckAdapter extends EventEmitter {
     });
 
     this.sessionTracker.on("permission:pending", ({ sessionId, tool }) => {
+      // Use per-session color for the button alert
+      const sessionColor = this.infobarManager.getSessionColor(sessionId);
       this.alertManager.startAlert(`session:${sessionId}`, {
         reason: "permission",
         label: sessionId.slice(-4),
         sublabel: tool ? `${tool}?` : "Permit?",
-        onColor: "#ff6600",
+        onColor: sessionColor,
         offColor: "#331100",
         icon: "shield",
       });
+      // Animate touch point LEDs with session-aware colors
+      this.infobarManager.showSessionAlert(sessionId, "permission");
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
       if (this.layoutManager.currentView === "sessions") {
         this._refreshAllButtons();
@@ -302,8 +322,9 @@ class StreamDeckAdapter extends EventEmitter {
 
     this.sessionTracker.on("permission:resolved", ({ sessionId }) => {
       this.alertManager.clearAlert(`session:${sessionId}`);
+      this.infobarManager.stopAnimation();
+      this.infobarManager.onSystemStateChange("active");
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
-      // If we're on the permission view for this session, go back
       if (
         this.layoutManager.currentView === "permission" &&
         this.layoutManager.focusedSessionId === sessionId
@@ -314,14 +335,16 @@ class StreamDeckAdapter extends EventEmitter {
     });
 
     this.sessionTracker.on("question:pending", ({ sessionId, message }) => {
+      const sessionColor = this.infobarManager.getSessionColor(sessionId);
       this.alertManager.startAlert(`session:${sessionId}`, {
         reason: "question",
         label: sessionId.slice(-4),
         sublabel: message ? message.substring(0, 10) : "Question",
-        onColor: "#ffcc00",
+        onColor: sessionColor,
         offColor: "#332200",
         icon: "clock",
       });
+      this.infobarManager.showSessionAlert(sessionId, "waiting");
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
       if (this.layoutManager.currentView === "sessions") {
         this._refreshAllButtons();
@@ -330,6 +353,8 @@ class StreamDeckAdapter extends EventEmitter {
 
     this.sessionTracker.on("question:resolved", ({ sessionId }) => {
       this.alertManager.clearAlert(`session:${sessionId}`);
+      this.infobarManager.stopAnimation();
+      this.infobarManager.onSystemStateChange("active");
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
       if (
         this.layoutManager.currentView === "question" &&
