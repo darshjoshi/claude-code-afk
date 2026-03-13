@@ -171,6 +171,9 @@ class StreamDeckAdapter extends EventEmitter {
           case "setStateStyle":
             this.infobarManager.setStateStyle(msg.state, msg.style);
             break;
+          case "refreshButtons":
+            this._refreshAllButtons();
+            break;
           default:
             this.bridge.broadcast("error", {
               error: `Unknown action: ${msg.action}`,
@@ -205,8 +208,29 @@ class StreamDeckAdapter extends EventEmitter {
       // so that when the alert clears, we can restore the default state
       const svg = this.renderer.render(state);
       this.bridge.updateButton(buttonId, state);
+
+      // Resolve keyIndex for plugin routing
+      let keyIndex;
+      if (this.layoutManager) {
+        const layout = this.layoutManager.getCurrentLayout();
+        for (const [idx, ctx] of Object.entries(layout.keys)) {
+          if (ctx && ctx.actionId === buttonId) {
+            keyIndex = parseInt(idx, 10);
+            break;
+          }
+        }
+      } else if (this.layout && this.layout.keys) {
+        for (const [idx, aid] of Object.entries(this.layout.keys)) {
+          if (aid === buttonId) {
+            keyIndex = parseInt(idx, 10);
+            break;
+          }
+        }
+      }
+
       this.bridge.broadcast("button:render", {
         buttonId,
+        keyIndex,
         state,
         svg,
       });
@@ -832,8 +856,29 @@ class StreamDeckAdapter extends EventEmitter {
     this._buttonStates[actionId] = state;
     const svg = this.renderer.render(state);
     this.bridge.updateButton(actionId, state);
+
+    // Resolve keyIndex from current layout so the plugin can route by position
+    let keyIndex;
+    if (this.layoutManager) {
+      const layout = this.layoutManager.getCurrentLayout();
+      for (const [idx, ctx] of Object.entries(layout.keys)) {
+        if (ctx && ctx.actionId === actionId) {
+          keyIndex = parseInt(idx, 10);
+          break;
+        }
+      }
+    } else if (this.layout && this.layout.keys) {
+      for (const [idx, aid] of Object.entries(this.layout.keys)) {
+        if (aid === actionId) {
+          keyIndex = parseInt(idx, 10);
+          break;
+        }
+      }
+    }
+
     this.bridge.broadcast("button:render", {
       buttonId: actionId,
+      keyIndex,
       state,
       svg,
     });
