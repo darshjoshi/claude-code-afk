@@ -257,38 +257,55 @@ class HookReceiver extends EventEmitter {
         break;
 
       case "stop":
-        // Claude stopped and is waiting for you to respond!
+        // Claude finished — update status but only alert if stop_hook_active
+        // (meaning Claude is blocked waiting for user input, not just done talking)
         this.bridge.updateState({
-          claudeStatus: "waiting",
+          claudeStatus: data.stop_hook_active ? "waiting" : "idle",
           lastEvent: event,
         });
-        this.bridge.updateButton("status", {
-          label: "WAITING",
-          color: "#ffcc00",
-        });
-        // BLINK: Claude finished — your turn to respond
-        if (this.adapter) {
-          this.adapter.triggerRespondAlert("stop", "Your turn");
+        if (data.stop_hook_active) {
+          this.bridge.updateButton("status", {
+            label: "WAITING",
+            color: "#ffcc00",
+          });
+          if (this.adapter) {
+            this.adapter.triggerRespondAlert("stop", "Your turn");
+          }
+        } else {
+          this.bridge.updateButton("status", {
+            label: "IDLE",
+            color: "#4488ff",
+            icon: "circle",
+          });
         }
         break;
 
-      case "notification":
+      case "notification": {
+        // Only alert for notification types that require user input
+        const needsInput = !data.notification_type ||
+          data.notification_type === "permission_prompt" ||
+          data.notification_type === "idle_prompt" ||
+          data.notification_type === "elicitation_dialog";
+
         this.bridge.updateState({
-          claudeStatus: "waiting",
+          claudeStatus: needsInput ? "waiting" : "active",
           lastEvent: event,
         });
-        this.bridge.updateButton("status", {
-          label: "ATTENTION",
-          color: "#ffcc00",
-        });
-        // BLINK: Claude is asking for your attention
-        if (this.adapter) {
-          this.adapter.triggerRespondAlert(
-            "notification",
-            data.message ? data.message.substring(0, 15) : "Needs input"
-          );
+
+        if (needsInput) {
+          this.bridge.updateButton("status", {
+            label: "ATTENTION",
+            color: "#ffcc00",
+          });
+          if (this.adapter) {
+            this.adapter.triggerRespondAlert(
+              "notification",
+              data.message ? data.message.substring(0, 15) : "Needs input"
+            );
+          }
         }
         break;
+      }
 
       case "permission-request":
         this.bridge.updateState({

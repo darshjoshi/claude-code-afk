@@ -1,9 +1,10 @@
 {
+  "UUID": "com.claude-code.afk",
   "Name": "Claude Code AFK",
-  "Version": "1.0.0",
+  "Version": "1.0.0.0",
   "Author": "Claude Code AFK",
   "Description": "Bridge plugin for Claude Code AFK — all keys driven by the bridge server with pre-rendered SVGs.",
-  "Category": "Claude Code",
+  "Category": "Claude Code AFK",
   "CategoryIcon": "imgs/plugin-icon",
   "Icon": "imgs/plugin-icon",
   "URL": "https://github.com/darshjoshi/claude-code-afk",
@@ -15,7 +16,11 @@
   "Software": {
     "MinimumVersion": "6.4"
   },
-  "NodeVersion": "20",
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "CodePath": "bin/plugin.js",
   "Actions": [
     {
       "Name": "Bridge Key",
@@ -28,7 +33,7 @@
         {
           "Image": "imgs/action-icon",
           "TitleAlignment": "middle",
-          "FontSize": "16",
+          "FontSize": 16,
           "ShowTitle": false
         }
       ],

@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import require$$0$3, { EventEmitter as EventEmitter$2 } from 'events';
@@ -10,8 +12,8 @@ import require$$0$2 from 'stream';
 import require$$7 from 'url';
 import require$$0 from 'zlib';
 import require$$0$1 from 'buffer';
-import fs, { existsSync, readFileSync } from 'node:fs';
-import path, { join } from 'node:path';
+import fs$1, { existsSync, readFileSync } from 'node:fs';
+import path$1, { join } from 'node:path';
 import { cwd } from 'node:process';
 import { randomUUID } from 'node:crypto';
 
@@ -5248,14 +5250,14 @@ class FileTarget {
      * @inheritdoc
      */
     write(entry) {
-        const fd = fs.openSync(this.#filePath, "a");
+        const fd = fs$1.openSync(this.#filePath, "a");
         try {
             const msg = this.#options.format(entry);
-            fs.writeSync(fd, msg + "\n");
+            fs$1.writeSync(fd, msg + "\n");
             this.#size += msg.length;
         }
         finally {
-            fs.closeSync(fd);
+            fs$1.closeSync(fd);
         }
         if (this.#size >= this.#options.maxSize) {
             this.reIndex();
@@ -5268,7 +5270,7 @@ class FileTarget {
      * @returns File path that represents the indexed log file.
      */
     getLogFilePath(index = 0) {
-        return path.join(this.#options.dest, `${this.#options.fileName}.${index}.log`);
+        return path$1.join(this.#options.dest, `${this.#options.fileName}.${index}.log`);
     }
     /**
      * Gets the log files associated with this file target, including past and present.
@@ -5276,7 +5278,7 @@ class FileTarget {
      */
     getLogFiles() {
         const regex = /^\.(\d+)\.log$/;
-        return fs
+        return fs$1
             .readdirSync(this.#options.dest, { withFileTypes: true })
             .reduce((prev, entry) => {
             if (entry.isDirectory() || entry.name.indexOf(this.#options.fileName) < 0) {
@@ -5287,7 +5289,7 @@ class FileTarget {
                 return prev;
             }
             prev.push({
-                path: path.join(this.#options.dest, entry.name),
+                path: path$1.join(this.#options.dest, entry.name),
                 index: parseInt(match[1]),
             });
             return prev;
@@ -5302,18 +5304,18 @@ class FileTarget {
      */
     reIndex() {
         // When the destination directory is new, create it, and return.
-        if (!fs.existsSync(this.#options.dest)) {
-            fs.mkdirSync(this.#options.dest);
+        if (!fs$1.existsSync(this.#options.dest)) {
+            fs$1.mkdirSync(this.#options.dest);
             return;
         }
         const logFiles = this.getLogFiles();
         for (let i = logFiles.length - 1; i >= 0; i--) {
             const log = logFiles[i];
             if (i >= this.#options.maxFileCount - 1) {
-                fs.rmSync(log.path);
+                fs$1.rmSync(log.path);
             }
             else {
-                fs.renameSync(log.path, this.getLogFilePath(i + 1));
+                fs$1.renameSync(log.path, this.getLogFilePath(i + 1));
             }
         }
     }
@@ -5339,14 +5341,14 @@ function isDebugMode() {
  * @returns The plugin's unique-identifier.
  */
 function getPluginUUID() {
-    const name = path.basename(process.cwd());
+    const name = path$1.basename(process.cwd());
     const suffixIndex = name.lastIndexOf(".sdPlugin");
     return suffixIndex < 0 ? name : name.substring(0, suffixIndex);
 }
 
 // Log all entires to a log file.
 const fileTarget = new FileTarget({
-    dest: path.join(cwd(), "logs"),
+    dest: path$1.join(cwd(), "logs"),
     fileName: getPluginUUID(),
     format: stringFormatter(),
     maxFileCount: 10,
@@ -6847,13 +6849,13 @@ const deviceService = new DeviceService();
  * @returns Contents of the locale.
  */
 function fileSystemLocaleProvider(language) {
-    const filePath = path.join(process.cwd(), `${language}.json`);
-    if (!fs.existsSync(filePath)) {
+    const filePath = path$1.join(process.cwd(), `${language}.json`);
+    if (!fs$1.existsSync(filePath)) {
         return null;
     }
     try {
         // Parse the translations from the file.
-        const contents = fs.readFileSync(filePath, { flag: "r" })?.toString();
+        const contents = fs$1.readFileSync(filePath, { flag: "r" })?.toString();
         return parseLocalizations(contents);
     }
     catch (err) {
@@ -6979,24 +6981,6 @@ var system = /*#__PURE__*/Object.freeze({
     onSystemDidWakeUp: onSystemDidWakeUp,
     openUrl: openUrl
 });
-
-/**
- * Defines a Stream Deck action associated with the plugin.
- * @param definition The definition of the action, e.g. it's identifier, name, etc.
- * @returns The definition decorator.
- */
-function action(definition) {
-    const manifestId = definition.UUID;
-    // eslint-disable-next-line @typescript-eslint/explicit-function-return-type, @typescript-eslint/no-unused-vars
-    return function (target, context) {
-        return class extends target {
-            /**
-             * The universally-unique value that identifies the action within the manifest.
-             */
-            manifestId = manifestId;
-        };
-    };
-}
 
 /**
  * Provides the main bridge between the plugin and the Stream Deck allowing the plugin to send requests and receive events, e.g. when the user presses an action.
@@ -7208,10 +7192,14 @@ function contextGaugeSvg(percent, color, formatted, maxFormatted) {
 </svg>`;
 }
 
+const logFile$1 = path.join(process.env.HOME || "/tmp", "claude-code-afk-plugin.log");
+function log$1(msg) {
+    fs.appendFileSync(logFile$1, `${new Date().toISOString()} [action] ${msg}\n`);
+}
 const CONTEXT_GAUGE_KEY = 7;
 const NEO_COLUMNS = 4;
-@action({ UUID: "com.claude-code.afk.bridge-key" })
 class BridgeKeyAction extends SingletonAction {
+    manifestId = "com.claude-code.afk.bridge-key";
     keyMap = new Map();
     bridgeClient = null;
     bridgeConnected = false;
@@ -7227,15 +7215,20 @@ class BridgeKeyAction extends SingletonAction {
         return -1;
     }
     onWillAppear(ev) {
+        log$1(`onWillAppear: coords=${JSON.stringify(ev.action.coordinates)}`);
         const keyIndex = this.getKeyIndex(ev.action);
         if (keyIndex < 0)
             return;
         this.keyMap.set(keyIndex, ev.action);
+        log$1(`  keyIndex=${keyIndex} mapSize=${this.keyMap.size} connected=${this.bridgeConnected}`);
         if (!this.bridgeConnected) {
             ev.action.setImage(svgToDataUri(offlineSvg()));
         }
-        else if (keyIndex === CONTEXT_GAUGE_KEY && this.lastGaugeSvg) {
-            ev.action.setImage(svgToDataUri(this.lastGaugeSvg));
+        // Request a full re-render now that we have keys registered.
+        // Bridge messages may have arrived before onWillAppear, so we re-request.
+        if (this.bridgeClient && this.bridgeConnected) {
+            log$1(`  requesting refreshButtons`);
+            this.bridgeClient.send({ action: "refreshButtons" });
         }
     }
     onWillDisappear(ev) {
@@ -7251,13 +7244,17 @@ class BridgeKeyAction extends SingletonAction {
         this.bridgeClient.send({ action: "keyDown", keyIndex });
     }
     handleBridgeMessage(msg) {
+        log$1(`msg: type=${msg.type} keyIndex=${msg.keyIndex} buttonId=${msg.buttonId}`);
         switch (msg.type) {
             case "button:render": {
                 const keyIndex = msg.keyIndex;
                 const svg = msg.svg;
-                if (keyIndex === undefined || !svg)
+                if (keyIndex === undefined || !svg) {
+                    log$1(`  skipped: keyIndex=${keyIndex} svg=${!!svg}`);
                     return;
+                }
                 const ctx = this.keyMap.get(keyIndex);
+                log$1(`  key=${keyIndex} ctx=${!!ctx} mapSize=${this.keyMap.size} mapKeys=[${Array.from(this.keyMap.keys())}]`);
                 if (ctx) {
                     ctx.setImage(svgToDataUri(svg));
                 }
@@ -7287,24 +7284,45 @@ class BridgeKeyAction extends SingletonAction {
     }
     markConnected() {
         this.bridgeConnected = true;
+        // If keys are already registered, request a refresh
+        if (this.keyMap.size > 0 && this.bridgeClient) {
+            log$1(`markConnected: ${this.keyMap.size} keys registered, requesting refresh`);
+            this.bridgeClient.send({ action: "refreshButtons" });
+        }
     }
 }
 
+// Write crash logs to a file we can inspect
+const logFile = path.join(process.env.HOME || "/tmp", "claude-code-afk-plugin.log");
+function log(msg) {
+    const line = `${new Date().toISOString()} ${msg}\n`;
+    fs.appendFileSync(logFile, line);
+}
+process.on("uncaughtException", (err) => {
+    log(`UNCAUGHT: ${err.message}\n${err.stack}`);
+});
+process.on("unhandledRejection", (reason) => {
+    log(`UNHANDLED: ${String(reason)}`);
+});
+log("=== Plugin starting ===");
+log(`argv: ${process.argv.join(" ")}`);
+log(`cwd: ${process.cwd()}`);
 const DEFAULT_BRIDGE_URL = "ws://127.0.0.1:8247";
+log("Imports loaded");
 const bridgeClient = new BridgeClient(DEFAULT_BRIDGE_URL);
 const bridgeKeyAction = new BridgeKeyAction();
 bridgeKeyAction.setBridgeClient(bridgeClient);
-// Route bridge messages to the action handler
 bridgeClient.on("message", (msg) => {
     bridgeKeyAction.handleBridgeMessage(msg);
 });
 bridgeClient.on("connected", () => {
+    log("Bridge connected");
     bridgeKeyAction.markConnected();
 });
 bridgeClient.on("disconnected", () => {
+    log("Bridge disconnected");
     bridgeKeyAction.showOffline();
 });
-// Allow bridge URL override via global settings
 streamDeck.settings.onDidReceiveGlobalSettings((ev) => {
     const settings = ev.settings;
     const url = settings?.bridgeUrl;
@@ -7312,8 +7330,14 @@ streamDeck.settings.onDidReceiveGlobalSettings((ev) => {
         bridgeClient.setUrl(url);
     }
 });
-// Register and connect
+log("Registering action...");
 streamDeck.actions.registerAction(bridgeKeyAction);
-streamDeck.connect();
-bridgeClient.connect();
+log("Calling streamDeck.connect()...");
+streamDeck.connect().then(() => {
+    log("Stream Deck connected! Starting bridge client...");
+    bridgeClient.connect();
+}).catch((err) => {
+    log(`streamDeck.connect() FAILED: ${err.message}`);
+});
+log("Plugin init complete (waiting for SD connect)");
 //# sourceMappingURL=plugin.js.map

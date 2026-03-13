@@ -59,8 +59,9 @@ async function startServer() {
   const controller = new ClaudeCodeController({ sessionTracker });
   const bridge = new BridgeServer({ port });
 
-  // Resolve layout (config overrides > device defaults)
-  const layout = config.getLayout();
+  // Resolve layout — CLI --deck flag overrides config device
+  const cliDeck = getArg("--deck");
+  const layout = cliDeck ? (LAYOUTS[cliDeck] || config.getLayout()) : config.getLayout();
   const device = getDevice(deckSize) || { keys: 15, cols: 5 };
 
   // Load LED configuration from saved preferences
