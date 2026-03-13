@@ -7101,21 +7101,28 @@ class BridgeClient extends EventEmitter$2 {
             this.scheduleReconnect();
             return;
         }
-        this.ws.on("open", () => {
-            this.emit("connected");
-            // Request full re-render from bridge
-            this.send({ action: "refreshButtons" });
-        });
-        this.ws.on("close", () => {
-            this.emit("disconnected");
-            if (!this.intentionalClose) {
-                this.scheduleReconnect();
+        const currentWs = this.ws;
+        currentWs.on("open", () => {
+            // Only emit if this is still the active WebSocket
+            if (this.ws === currentWs) {
+                this.emit("connected");
             }
         });
-        this.ws.on("error", () => {
+        currentWs.on("close", () => {
+            // Only emit if this is still the active WebSocket
+            // Prevents stale close from a replaced connection triggering showOffline
+            if (this.ws === currentWs) {
+                this.ws = null;
+                if (!this.intentionalClose) {
+                    this.emit("disconnected");
+                    this.scheduleReconnect();
+                }
+            }
+        });
+        currentWs.on("error", () => {
             // Error will be followed by close event
         });
-        this.ws.on("message", (data) => {
+        currentWs.on("message", (data) => {
             try {
                 const msg = JSON.parse(data.toString());
                 this.emit("message", msg);
@@ -7142,8 +7149,9 @@ class BridgeClient extends EventEmitter$2 {
             this.reconnectTimer = null;
         }
         if (this.ws) {
-            this.ws.close();
-            this.ws = null;
+            const old = this.ws;
+            this.ws = null; // Detach before close so the close handler is a no-op
+            old.close();
         }
     }
     scheduleReconnect() {
@@ -7204,6 +7212,7 @@ class BridgeKeyAction extends SingletonAction {
     bridgeClient = null;
     bridgeConnected = false;
     lastGaugeSvg = null;
+    refreshPending = false;
     setBridgeClient(client) {
         this.bridgeClient = client;
     }
@@ -7214,21 +7223,38 @@ class BridgeKeyAction extends SingletonAction {
         }
         return -1;
     }
+    /**
+     * Send a single refreshButtons request, debounced so that multiple
+     * onWillAppear calls in the same tick only trigger one refresh.
+     */
+    requestRefresh() {
+        if (this.refreshPending || !this.bridgeClient || !this.bridgeConnected)
+            return;
+        this.refreshPending = true;
+        setTimeout(() => {
+            this.refreshPending = false;
+            if (this.bridgeClient && this.bridgeConnected) {
+                log$1(`requestRefresh: sending refreshButtons (mapSize=${this.keyMap.size})`);
+                this.bridgeClient.send({ action: "refreshButtons" });
+            }
+        }, 100);
+    }
     onWillAppear(ev) {
-        log$1(`onWillAppear: coords=${JSON.stringify(ev.action.coordinates)}`);
         const keyIndex = this.getKeyIndex(ev.action);
         if (keyIndex < 0)
             return;
         this.keyMap.set(keyIndex, ev.action);
-        log$1(`  keyIndex=${keyIndex} mapSize=${this.keyMap.size} connected=${this.bridgeConnected}`);
+        log$1(`onWillAppear: keyIndex=${keyIndex} mapSize=${this.keyMap.size} connected=${this.bridgeConnected}`);
         if (!this.bridgeConnected) {
             ev.action.setImage(svgToDataUri(offlineSvg()));
         }
-        // Request a full re-render now that we have keys registered.
-        // Bridge messages may have arrived before onWillAppear, so we re-request.
-        if (this.bridgeClient && this.bridgeConnected) {
-            log$1(`  requesting refreshButtons`);
-            this.bridgeClient.send({ action: "refreshButtons" });
+        else if (keyIndex === CONTEXT_GAUGE_KEY && this.lastGaugeSvg) {
+            // Restore cached gauge immediately
+            ev.action.setImage(svgToDataUri(this.lastGaugeSvg));
+        }
+        // Request a re-render — bridge messages may have arrived before onWillAppear
+        if (this.bridgeConnected) {
+            this.requestRefresh();
         }
     }
     onWillDisappear(ev) {
@@ -7244,17 +7270,13 @@ class BridgeKeyAction extends SingletonAction {
         this.bridgeClient.send({ action: "keyDown", keyIndex });
     }
     handleBridgeMessage(msg) {
-        log$1(`msg: type=${msg.type} keyIndex=${msg.keyIndex} buttonId=${msg.buttonId}`);
         switch (msg.type) {
             case "button:render": {
                 const keyIndex = msg.keyIndex;
                 const svg = msg.svg;
-                if (keyIndex === undefined || !svg) {
-                    log$1(`  skipped: keyIndex=${keyIndex} svg=${!!svg}`);
+                if (keyIndex === undefined || !svg)
                     return;
-                }
                 const ctx = this.keyMap.get(keyIndex);
-                log$1(`  key=${keyIndex} ctx=${!!ctx} mapSize=${this.keyMap.size} mapKeys=[${Array.from(this.keyMap.keys())}]`);
                 if (ctx) {
                     ctx.setImage(svgToDataUri(svg));
                 }
@@ -7284,11 +7306,8 @@ class BridgeKeyAction extends SingletonAction {
     }
     markConnected() {
         this.bridgeConnected = true;
-        // If keys are already registered, request a refresh
-        if (this.keyMap.size > 0 && this.bridgeClient) {
-            log$1(`markConnected: ${this.keyMap.size} keys registered, requesting refresh`);
-            this.bridgeClient.send({ action: "refreshButtons" });
-        }
+        // Request refresh — keys may already be registered from onWillAppear
+        this.requestRefresh();
     }
 }
 

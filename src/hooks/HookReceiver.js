@@ -136,31 +136,46 @@ class HookReceiver extends EventEmitter {
         break;
 
       case "pre-tool-use": {
+        // Pass through to Claude's normal permission UI.
+        // If the tool was session-approved on the deck, auto-allow.
+        // Otherwise respond "ask" so Claude shows the permission dialog
+        // in the terminal — the user can then decide from the deck
+        // via the PermissionRequest hook.
+        if (sessionId) {
+          const tool = data.tool;
+          if (this.sessionTracker.hasSessionApproval(sessionId, tool)) {
+            res.writeHead(200, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({
+              hookSpecificOutput: {
+                hookEventName: "PreToolUse",
+                permissionDecision: "allow",
+                permissionDecisionReason: "session approval",
+              },
+            }));
+            this.sessionTracker.updateStatus(sessionId, event, { tool, cwd: data.cwd });
+            break;
+          }
+          this.sessionTracker.updateStatus(sessionId, event, { tool, cwd: data.cwd });
+        }
+        this._updateBridgeState(event, data);
+        this._respondOk(res);
+        break;
+      }
+
+      case "permission-request": {
+        // Claude is showing the permission dialog in the terminal.
+        // Hold the HTTP response so the user can approve/deny from the deck.
         if (!sessionId) {
+          this._updateBridgeState(event, data);
           this._respondOk(res);
           break;
         }
 
         const tool = data.tool;
-
-        // Check if tool is already approved for this session
-        if (this.sessionTracker.hasSessionApproval(sessionId, tool)) {
-          res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: "allow",
-              permissionDecisionReason: "session approval",
-            },
-          }));
-          this.sessionTracker.updateStatus(sessionId, event, { tool, cwd: data.cwd });
-          break;
-        }
-
-        // Hold the HTTP response — Claude waits
         this.sessionTracker.updateStatus(sessionId, event, { tool, cwd: data.cwd });
         this.sessionTracker.setPendingPermission(sessionId, {
           tool,
+          hookEvent: "PermissionRequest",
           body: data.raw,
           resolve: (response) => {
             try {
@@ -171,6 +186,7 @@ class HookReceiver extends EventEmitter {
             }
           },
         });
+        this._updateBridgeState(event, data);
         break;
       }
 
@@ -181,19 +197,26 @@ class HookReceiver extends EventEmitter {
           break;
         }
 
-        // Hold the HTTP response for stop hooks too
         this.sessionTracker.updateStatus(sessionId, event, { cwd: data.cwd });
-        this.sessionTracker.setPendingQuestion(sessionId, {
-          message: data.message,
-          resolve: (response) => {
-            try {
-              res.writeHead(200, { "Content-Type": "application/json" });
-              res.end(JSON.stringify(response));
-            } catch {
-              // Client may have disconnected
-            }
-          },
-        });
+
+        // Only hold the HTTP response if the stop hook is active
+        // (Claude is blocked waiting for user input, not just finishing normally)
+        if (data.raw?.stop_hook_active) {
+          this.sessionTracker.setPendingQuestion(sessionId, {
+            message: data.message,
+            resolve: (response) => {
+              try {
+                res.writeHead(200, { "Content-Type": "application/json" });
+                res.end(JSON.stringify(response));
+              } catch {
+                // Client may have disconnected
+              }
+            },
+          });
+        } else {
+          this._updateBridgeState(event, data);
+          this._respondOk(res);
+        }
         break;
       }
 
@@ -219,7 +242,7 @@ class HookReceiver extends EventEmitter {
         break;
 
       default:
-        // post-tool-use, permission-request, etc.
+        // post-tool-use, etc.
         if (sessionId) {
           this.sessionTracker.updateStatus(sessionId, event, {
             tool: data.tool,
@@ -256,14 +279,15 @@ class HookReceiver extends EventEmitter {
         }
         break;
 
-      case "stop":
-        // Claude finished — update status but only alert if stop_hook_active
+      case "stop": {
+        // Claude finished — only alert if stop_hook_active
         // (meaning Claude is blocked waiting for user input, not just done talking)
+        const stopActive = !!data.raw?.stop_hook_active;
         this.bridge.updateState({
-          claudeStatus: data.stop_hook_active ? "waiting" : "idle",
+          claudeStatus: stopActive ? "waiting" : "idle",
           lastEvent: event,
         });
-        if (data.stop_hook_active) {
+        if (stopActive) {
           this.bridge.updateButton("status", {
             label: "WAITING",
             color: "#ffcc00",
@@ -279,13 +303,15 @@ class HookReceiver extends EventEmitter {
           });
         }
         break;
+      }
 
       case "notification": {
         // Only alert for notification types that require user input
-        const needsInput = !data.notification_type ||
-          data.notification_type === "permission_prompt" ||
-          data.notification_type === "idle_prompt" ||
-          data.notification_type === "elicitation_dialog";
+        const notificationType = data.raw?.notification_type;
+        const needsInput = !notificationType ||
+          notificationType === "permission_prompt" ||
+          notificationType === "idle_prompt" ||
+          notificationType === "elicitation_dialog";
 
         this.bridge.updateState({
           claudeStatus: needsInput ? "waiting" : "active",

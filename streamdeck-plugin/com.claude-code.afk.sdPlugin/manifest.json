@@ -14,7 +14,7 @@
     { "Platform": "windows", "MinimumVersion": "10" }
   ],
   "Software": {
-    "MinimumVersion": "6.4"
+    "MinimumVersion": "6.9"
   },
   "Nodejs": {
     "Version": "20",

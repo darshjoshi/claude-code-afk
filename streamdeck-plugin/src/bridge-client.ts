@@ -40,24 +40,32 @@ export class BridgeClient extends EventEmitter {
       return;
     }
 
-    this.ws.on("open", () => {
-      this.emit("connected");
-      // Request full re-render from bridge
-      this.send({ action: "refreshButtons" });
-    });
+    const currentWs = this.ws;
 
-    this.ws.on("close", () => {
-      this.emit("disconnected");
-      if (!this.intentionalClose) {
-        this.scheduleReconnect();
+    currentWs.on("open", () => {
+      // Only emit if this is still the active WebSocket
+      if (this.ws === currentWs) {
+        this.emit("connected");
       }
     });
 
-    this.ws.on("error", () => {
+    currentWs.on("close", () => {
+      // Only emit if this is still the active WebSocket
+      // Prevents stale close from a replaced connection triggering showOffline
+      if (this.ws === currentWs) {
+        this.ws = null;
+        if (!this.intentionalClose) {
+          this.emit("disconnected");
+          this.scheduleReconnect();
+        }
+      }
+    });
+
+    currentWs.on("error", () => {
       // Error will be followed by close event
     });
 
-    this.ws.on("message", (data: WebSocket.RawData) => {
+    currentWs.on("message", (data: WebSocket.RawData) => {
       try {
         const msg = JSON.parse(data.toString()) as BridgeMessage;
         this.emit("message", msg);
@@ -86,8 +94,9 @@ export class BridgeClient extends EventEmitter {
       this.reconnectTimer = null;
     }
     if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+      const old = this.ws;
+      this.ws = null; // Detach before close so the close handler is a no-op
+      old.close();
     }
   }
 

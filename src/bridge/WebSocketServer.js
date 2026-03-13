@@ -83,6 +83,7 @@ class WebSocketServer extends EventEmitter {
 
     const opcode = buffer[0] & 0x0f;
     // Connection close — send close response and tear down
+    // Note: don't emit "disconnect" here — the socket "close" event will handle it
     if (opcode === 0x08) {
       const closeFrame = Buffer.alloc(2);
       closeFrame[0] = 0x88; // FIN + close
@@ -91,8 +92,6 @@ class WebSocketServer extends EventEmitter {
         ws.socket.write(closeFrame);
         ws.socket.end();
       }
-      this.clients.delete(ws);
-      this.emit("disconnect", ws);
       return null;
     }
     // Ping — respond with pong

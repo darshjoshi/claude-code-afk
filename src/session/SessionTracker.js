@@ -179,13 +179,28 @@ class SessionTracker extends EventEmitter {
 
     clearTimeout(pending.timeout);
 
-    const response = {
-      hookSpecificOutput: {
-        hookEventName: "PreToolUse",
-        permissionDecision: decision,
-        permissionDecisionReason: reason || "",
-      },
-    };
+    // PermissionRequest hook uses a different response format than PreToolUse
+    const hookEvent = pending.hookEvent || "PreToolUse";
+    let response;
+    if (hookEvent === "PermissionRequest") {
+      response = {
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: {
+            behavior: decision === "allow" ? "allow" : "deny",
+            message: reason || "",
+          },
+        },
+      };
+    } else {
+      response = {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: decision,
+          permissionDecisionReason: reason || "",
+        },
+      };
+    }
 
     try {
       pending.resolve(response);

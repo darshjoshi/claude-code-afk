@@ -214,7 +214,15 @@ class StreamDeckAdapter extends EventEmitter {
       if (this.layoutManager) {
         const layout = this.layoutManager.getCurrentLayout();
         for (const [idx, ctx] of Object.entries(layout.keys)) {
-          if (ctx && ctx.actionId === buttonId) {
+          if (!ctx) continue;
+          // Direct match by actionId
+          if (ctx.actionId === buttonId) {
+            keyIndex = parseInt(idx, 10);
+            break;
+          }
+          // Session alert: buttonId is "session:{id}", layout has actionId "sessionButton"
+          if (buttonId.startsWith("session:") && ctx.actionId === "sessionButton" &&
+              ctx.meta?.session?.sessionId === buttonId.replace("session:", "")) {
             keyIndex = parseInt(idx, 10);
             break;
           }
@@ -862,7 +870,14 @@ class StreamDeckAdapter extends EventEmitter {
     if (this.layoutManager) {
       const layout = this.layoutManager.getCurrentLayout();
       for (const [idx, ctx] of Object.entries(layout.keys)) {
-        if (ctx && ctx.actionId === actionId) {
+        if (!ctx) continue;
+        if (ctx.actionId === actionId) {
+          keyIndex = parseInt(idx, 10);
+          break;
+        }
+        // Session update: actionId is "session:{id}", layout has "sessionButton"
+        if (actionId.startsWith("session:") && ctx.actionId === "sessionButton" &&
+            ctx.meta?.session?.sessionId === actionId.replace("session:", "")) {
           keyIndex = parseInt(idx, 10);
           break;
         }

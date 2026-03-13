@@ -28,6 +28,7 @@ export class BridgeKeyAction extends SingletonAction {
   private bridgeClient: BridgeClient | null = null;
   private bridgeConnected = false;
   private lastGaugeSvg: string | null = null;
+  private refreshPending = false;
 
   setBridgeClient(client: BridgeClient): void {
     this.bridgeClient = client;
@@ -43,25 +44,41 @@ export class BridgeKeyAction extends SingletonAction {
     return -1;
   }
 
+  /**
+   * Send a single refreshButtons request, debounced so that multiple
+   * onWillAppear calls in the same tick only trigger one refresh.
+   */
+  private requestRefresh(): void {
+    if (this.refreshPending || !this.bridgeClient || !this.bridgeConnected) return;
+    this.refreshPending = true;
+    setTimeout(() => {
+      this.refreshPending = false;
+      if (this.bridgeClient && this.bridgeConnected) {
+        log(`requestRefresh: sending refreshButtons (mapSize=${this.keyMap.size})`);
+        this.bridgeClient.send({ action: "refreshButtons" });
+      }
+    }, 100);
+  }
+
   override onWillAppear(ev: WillAppearEvent): void {
-    log(`onWillAppear: coords=${JSON.stringify((ev.action as any).coordinates)}`);
     const keyIndex = this.getKeyIndex(
       ev.action as unknown as { coordinates?: { row: number; column: number } }
     );
     if (keyIndex < 0) return;
 
     this.keyMap.set(keyIndex, ev.action as unknown as ImageSetter);
-    log(`  keyIndex=${keyIndex} mapSize=${this.keyMap.size} connected=${this.bridgeConnected}`);
+    log(`onWillAppear: keyIndex=${keyIndex} mapSize=${this.keyMap.size} connected=${this.bridgeConnected}`);
 
     if (!this.bridgeConnected) {
       (ev.action as unknown as ImageSetter).setImage(svgToDataUri(offlineSvg()));
+    } else if (keyIndex === CONTEXT_GAUGE_KEY && this.lastGaugeSvg) {
+      // Restore cached gauge immediately
+      (ev.action as unknown as ImageSetter).setImage(svgToDataUri(this.lastGaugeSvg));
     }
 
-    // Request a full re-render now that we have keys registered.
-    // Bridge messages may have arrived before onWillAppear, so we re-request.
-    if (this.bridgeClient && this.bridgeConnected) {
-      log(`  requesting refreshButtons`);
-      this.bridgeClient.send({ action: "refreshButtons" });
+    // Request a re-render — bridge messages may have arrived before onWillAppear
+    if (this.bridgeConnected) {
+      this.requestRefresh();
     }
   }
 
@@ -82,18 +99,13 @@ export class BridgeKeyAction extends SingletonAction {
   }
 
   handleBridgeMessage(msg: BridgeMessage): void {
-    log(`msg: type=${msg.type} keyIndex=${msg.keyIndex} buttonId=${msg.buttonId}`);
     switch (msg.type) {
       case "button:render": {
         const keyIndex = msg.keyIndex as number | undefined;
         const svg = msg.svg as string | undefined;
-        if (keyIndex === undefined || !svg) {
-          log(`  skipped: keyIndex=${keyIndex} svg=${!!svg}`);
-          return;
-        }
+        if (keyIndex === undefined || !svg) return;
 
         const ctx = this.keyMap.get(keyIndex);
-        log(`  key=${keyIndex} ctx=${!!ctx} mapSize=${this.keyMap.size} mapKeys=[${Array.from(this.keyMap.keys())}]`);
         if (ctx) {
           ctx.setImage(svgToDataUri(svg));
         }
@@ -122,8 +134,6 @@ export class BridgeKeyAction extends SingletonAction {
       }
 
       case "state:sync":
-        // refreshButtons (sent by BridgeClient on open) causes the bridge to
-        // send button:render messages with keyIndex for every key.
         break;
 
       default:
@@ -141,10 +151,7 @@ export class BridgeKeyAction extends SingletonAction {
 
   markConnected(): void {
     this.bridgeConnected = true;
-    // If keys are already registered, request a refresh
-    if (this.keyMap.size > 0 && this.bridgeClient) {
-      log(`markConnected: ${this.keyMap.size} keys registered, requesting refresh`);
-      this.bridgeClient.send({ action: "refreshButtons" });
-    }
+    // Request refresh — keys may already be registered from onWillAppear
+    this.requestRefresh();
   }
 }
