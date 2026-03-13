@@ -23,15 +23,19 @@ describe("LayoutManager", () => {
       assert.equal(ctx.actionId, "status");
     });
 
-    it("adds SESSIONS button when sessions exist", () => {
+    it("has SESSIONS button in base layout", () => {
       lm.updateSessions([
         { sessionId: "abc", pendingPermission: null, pendingQuestion: null },
       ]);
       lm.switchView("default");
-      // Last key (index 5 for 6-key device) should be sessionsView
-      const ctx = lm.getActionContext(5);
+      // sessionsView is at key 2 in the mini base layout
+      const ctx = lm.getActionContext(2);
       assert.ok(ctx);
       assert.equal(ctx.actionId, "sessionsView");
+      // Last key (backButton) should NOT be overwritten
+      const lastCtx = lm.getActionContext(5);
+      assert.ok(lastCtx);
+      assert.equal(lastCtx.actionId, "backButton");
     });
   });
 
@@ -88,7 +92,11 @@ describe("LayoutManager", () => {
       assert.equal(lm.currentView, "question");
 
       assert.equal(lm.getActionContext(0).actionId, "permissionInfo");
-      assert.equal(lm.getActionContext(1).actionId, "focusTerminal");
+      assert.equal(lm.getActionContext(1).actionId, "answerYes");
+      assert.equal(lm.getActionContext(2).actionId, "answerNo");
+      assert.equal(lm.getActionContext(3).actionId, "answerContinue");
+      assert.equal(lm.getActionContext(4).actionId, "answerSkip");
+      // Key 5 = backButton (totalKeys-1), overrides focusTerminal on 6-key device
       assert.equal(lm.getActionContext(5).actionId, "backButton");
     });
   });

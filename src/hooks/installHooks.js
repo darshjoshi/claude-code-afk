@@ -92,6 +92,17 @@ function generateHookConfig(options = {}) {
           ],
         },
       ],
+      PermissionRequest: [
+        {
+          matcher: "",
+          hooks: [
+            {
+              type: "http",
+              url: `${baseUrl}/hooks/permission-request`,
+            },
+          ],
+        },
+      ],
     },
   };
 }
@@ -186,4 +197,25 @@ function uninstallHooks(options = {}) {
   return { removed: true, count: removedCount };
 }
 
-module.exports = { generateHookConfig, installHooks, uninstallHooks };
+function installStatuslineScript(options = {}) {
+  const baseUrl = `http://${options.host || DEFAULT_HOST}:${options.port || DEFAULT_PORT}`;
+  const scriptPath = path.join(os.homedir(), ".claude", "statusline.sh");
+
+  const script = `#!/bin/bash
+# Stream Deck bridge statusline forwarder
+# Reads JSON from stdin (Claude Code statusline) and POSTs to the bridge
+INPUT=$(cat)
+curl -s -X POST "${baseUrl}/hooks/statusline" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"context_window\\": $INPUT}" \\
+  > /dev/null 2>&1
+`;
+
+  const dir = path.dirname(scriptPath);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+
+  return { scriptPath };
+}
+
+module.exports = { generateHookConfig, installHooks, uninstallHooks, installStatuslineScript };

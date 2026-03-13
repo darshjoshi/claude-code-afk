@@ -39,9 +39,9 @@ class WebSocketServer extends EventEmitter {
     this.clients.add(ws);
 
     socket.on("data", (buffer) => {
-      const message = this._decodeFrame(buffer);
-      if (message !== null) {
-        this.emit("message", ws, message);
+      const result = this._decodeFrame(buffer, ws);
+      if (result !== null) {
+        this.emit("message", ws, result);
       }
     });
 
@@ -78,14 +78,33 @@ class WebSocketServer extends EventEmitter {
     this.clients.clear();
   }
 
-  _decodeFrame(buffer) {
+  _decodeFrame(buffer, ws) {
     if (buffer.length < 2) return null;
 
     const opcode = buffer[0] & 0x0f;
-    // Connection close
-    if (opcode === 0x08) return null;
-    // Ping - respond with pong
-    if (opcode === 0x09) return null;
+    // Connection close — send close response and tear down
+    if (opcode === 0x08) {
+      const closeFrame = Buffer.alloc(2);
+      closeFrame[0] = 0x88; // FIN + close
+      closeFrame[1] = 0;
+      if (ws && ws.socket.writable) {
+        ws.socket.write(closeFrame);
+        ws.socket.end();
+      }
+      this.clients.delete(ws);
+      this.emit("disconnect", ws);
+      return null;
+    }
+    // Ping — respond with pong
+    if (opcode === 0x09) {
+      const pongFrame = Buffer.alloc(2);
+      pongFrame[0] = 0x8a; // FIN + pong
+      pongFrame[1] = 0;
+      if (ws && ws.socket.writable) {
+        ws.socket.write(pongFrame);
+      }
+      return null;
+    }
 
     const masked = (buffer[1] & 0x80) !== 0;
     let payloadLength = buffer[1] & 0x7f;

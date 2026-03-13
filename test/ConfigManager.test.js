@@ -61,9 +61,9 @@ describe("ConfigManager", () => {
   it("setDialAction stores dial mapping", () => {
     config.load();
     config.setDevice("plus");
-    config.setDialAction(0, "maxTurns");
+    config.setDialAction(0, "volume");
     const layout = config.getLayout();
-    assert.equal(layout.dials[0], "maxTurns");
+    assert.equal(layout.dials[0], "volume");
   });
 
   it("setPedalAction stores pedal mapping", () => {

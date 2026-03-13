@@ -7,6 +7,7 @@ const {
   generateHookConfig,
   installHooks,
   uninstallHooks,
+  installStatuslineScript,
 } = require("../src/hooks/installHooks");
 
 describe("installHooks", () => {
@@ -27,6 +28,7 @@ describe("installHooks", () => {
     assert.ok(config.hooks.PostToolUse);
     assert.ok(config.hooks.SessionStart);
     assert.ok(config.hooks.SessionEnd);
+    assert.ok(config.hooks.PermissionRequest);
   });
 
   it("generateHookConfig uses custom port", () => {
@@ -70,5 +72,30 @@ describe("installHooks", () => {
       settingsPath: path.join(tmpDir, "nonexistent.json"),
     });
     assert.equal(result.removed, false);
+  });
+
+  it("generateHookConfig includes PermissionRequest event", () => {
+    const config = generateHookConfig({ port: 8247 });
+    const url = config.hooks.PermissionRequest[0].hooks[0].url;
+    assert.ok(url.includes("/hooks/permission-request"));
+  });
+
+  it("installStatuslineScript creates executable script", () => {
+    const scriptDir = path.join(tmpDir, "statusline-test");
+    fs.mkdirSync(scriptDir, { recursive: true });
+    // Override HOME to write to temp dir
+    const origHome = os.homedir;
+    os.homedir = () => scriptDir;
+    try {
+      const result = installStatuslineScript({ port: 8247 });
+      assert.ok(fs.existsSync(result.scriptPath));
+      const content = fs.readFileSync(result.scriptPath, "utf8");
+      assert.ok(content.includes("/hooks/statusline"));
+      assert.ok(content.includes("8247"));
+      const stats = fs.statSync(result.scriptPath);
+      assert.ok(stats.mode & 0o100, "script should be executable");
+    } finally {
+      os.homedir = origHome;
+    }
   });
 });

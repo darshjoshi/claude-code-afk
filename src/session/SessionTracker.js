@@ -36,6 +36,7 @@ class SessionTracker extends EventEmitter {
       pendingQuestion: null,
       sessionApprovals: new Set(),
       label: id.length >= 4 ? id.slice(-4) : id,
+      cwd: null,
     };
 
     this._sessions.set(id, session);
@@ -82,6 +83,8 @@ class SessionTracker extends EventEmitter {
 
     session.lastEvent = event;
     session.lastEventTime = Date.now();
+
+    if (data.cwd) session.cwd = data.cwd;
 
     if (event === "pre-tool-use" && data.tool) {
       session.currentTool = data.tool;
@@ -176,10 +179,13 @@ class SessionTracker extends EventEmitter {
 
     clearTimeout(pending.timeout);
 
-    const response = { decision };
-    if (decision === "deny" && reason) {
-      response.reason = reason;
-    }
+    const response = {
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: decision,
+        permissionDecisionReason: reason || "",
+      },
+    };
 
     try {
       pending.resolve(response);
@@ -220,24 +226,31 @@ class SessionTracker extends EventEmitter {
 
   /**
    * Resolve a pending question (acknowledge, release HTTP response).
+   * @param {string} id - Session ID
+   * @param {string} [answer] - The user's answer (e.g. "yes", "no", "continue", "skip")
    */
-  resolveQuestion(id) {
+  resolveQuestion(id, answer) {
     const session = this._sessions.get(id);
     if (!session || !session.pendingQuestion) return false;
 
-    this._resolveQuestionCallback(session);
-    this.emit("question:resolved", { sessionId: id });
+    this._resolveQuestionCallback(session, answer);
+    this.emit("question:resolved", { sessionId: id, answer });
     return true;
   }
 
-  _resolveQuestionCallback(session) {
+  _resolveQuestionCallback(session, answer) {
     const pending = session.pendingQuestion;
     if (!pending) return;
 
     clearTimeout(pending.timeout);
 
+    const response = { status: "ok" };
+    if (answer) {
+      response.answer = answer;
+    }
+
     try {
-      pending.resolve({ status: "ok" });
+      pending.resolve(response);
     } catch (err) {
       // Response may have already been sent
     }

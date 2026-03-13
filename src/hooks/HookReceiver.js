@@ -49,6 +49,19 @@ class HookReceiver extends EventEmitter {
       const eventType = body?.event || "unknown";
       this._handleHook(eventType, body, res);
     });
+
+    // Statusline endpoint — receives context_window data from statusline script
+    this.bridge.route("POST", "/hooks/statusline", (req, res, body) => {
+      if (this.adapter?.infobarManager && body?.context_window) {
+        const cw = body.context_window;
+        this.adapter.infobarManager.updateContext(
+          cw.tokens_used || cw.tokensUsed || 0,
+          cw.max_tokens || cw.maxTokens || undefined
+        );
+      }
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok" }));
+    });
   }
 
   _handleHook(event, body, res) {
@@ -77,6 +90,8 @@ class HookReceiver extends EventEmitter {
       sessionId: body?.session_id || null,
       tool: body?.tool_name || body?.tool || null,
       message: body?.message || body?.notification || null,
+      cwd: body?.cwd || null,
+      contextWindow: body?.context_window || null,
       // Context window usage (when provided by Claude Code hooks)
       tokensUsed: body?.tokens_used || body?.context_tokens || null,
       maxTokens: body?.max_tokens || body?.context_max || null,
@@ -107,14 +122,14 @@ class HookReceiver extends EventEmitter {
       case "session-start":
         if (sessionId) {
           this.sessionTracker.registerSession(sessionId);
-          this.sessionTracker.updateStatus(sessionId, event);
+          this.sessionTracker.updateStatus(sessionId, event, { cwd: data.cwd });
         }
         this._respondOk(res);
         break;
 
       case "session-end":
         if (sessionId) {
-          this.sessionTracker.updateStatus(sessionId, event);
+          this.sessionTracker.updateStatus(sessionId, event, { cwd: data.cwd });
           this.sessionTracker.removeSession(sessionId);
         }
         this._respondOk(res);
@@ -131,13 +146,19 @@ class HookReceiver extends EventEmitter {
         // Check if tool is already approved for this session
         if (this.sessionTracker.hasSessionApproval(sessionId, tool)) {
           res.writeHead(200, { "Content-Type": "application/json" });
-          res.end(JSON.stringify({ decision: "allow" }));
-          this.sessionTracker.updateStatus(sessionId, event, { tool });
+          res.end(JSON.stringify({
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: "allow",
+              permissionDecisionReason: "session approval",
+            },
+          }));
+          this.sessionTracker.updateStatus(sessionId, event, { tool, cwd: data.cwd });
           break;
         }
 
         // Hold the HTTP response — Claude waits
-        this.sessionTracker.updateStatus(sessionId, event, { tool });
+        this.sessionTracker.updateStatus(sessionId, event, { tool, cwd: data.cwd });
         this.sessionTracker.setPendingPermission(sessionId, {
           tool,
           body: data.raw,
@@ -161,7 +182,7 @@ class HookReceiver extends EventEmitter {
         }
 
         // Hold the HTTP response for stop hooks too
-        this.sessionTracker.updateStatus(sessionId, event);
+        this.sessionTracker.updateStatus(sessionId, event, { cwd: data.cwd });
         this.sessionTracker.setPendingQuestion(sessionId, {
           message: data.message,
           resolve: (response) => {
@@ -180,7 +201,7 @@ class HookReceiver extends EventEmitter {
         if (sessionId) {
           // User responded in terminal — resolve any pending question
           this.sessionTracker.resolveQuestion(sessionId);
-          this.sessionTracker.updateStatus(sessionId, event);
+          this.sessionTracker.updateStatus(sessionId, event, { cwd: data.cwd });
         }
         this._respondOk(res);
         break;
@@ -189,6 +210,7 @@ class HookReceiver extends EventEmitter {
         if (sessionId) {
           this.sessionTracker.updateStatus(sessionId, event, {
             message: data.message,
+            cwd: data.cwd,
           });
         }
         // Also update bridge state for backward compat
@@ -201,6 +223,7 @@ class HookReceiver extends EventEmitter {
         if (sessionId) {
           this.sessionTracker.updateStatus(sessionId, event, {
             tool: data.tool,
+            cwd: data.cwd,
           });
         }
         this._updateBridgeState(event, data);

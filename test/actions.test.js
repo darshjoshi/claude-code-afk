@@ -11,21 +11,26 @@ const {
   getLayout,
   listActions,
   listCategories,
-  createCustomAction,
 } = require("../src/streamdeck/actions");
 
 describe("actions", () => {
   it("ACTIONS contains expected core actions", () => {
     assert.ok(ACTIONS.status);
     assert.ok(ACTIONS.abort);
-    assert.ok(ACTIONS.reviewCode);
-    assert.ok(ACTIONS.commit);
+    assert.ok(ACTIONS.sessionsView);
+    assert.ok(ACTIONS.allowTool);
+    assert.ok(ACTIONS.denyTool);
     assert.ok(ACTIONS.newSession);
   });
 
-  it("includes dial, pedal, and touch actions", () => {
-    assert.ok(ACTIONS.scrollContext);
-    assert.ok(ACTIONS.modelSelect);
+  it("includes question-response actions", () => {
+    assert.ok(ACTIONS.answerYes);
+    assert.ok(ACTIONS.answerNo);
+    assert.ok(ACTIONS.answerContinue);
+    assert.ok(ACTIONS.answerSkip);
+  });
+
+  it("includes pedal and touch actions", () => {
     assert.ok(ACTIONS.pedalAbort);
     assert.ok(ACTIONS.pedalAccept);
     assert.ok(ACTIONS.contextBar);
@@ -93,24 +98,9 @@ describe("actions", () => {
   it("listCategories groups actions correctly", () => {
     const cats = listCategories();
     assert.ok(cats.info);
-    assert.ok(cats.prompt);
     assert.ok(cats.control);
-  });
-
-  it("createCustomAction creates a valid action", () => {
-    const action = createCustomAction("lint", {
-      name: "Lint",
-      prompt: "Run the linter",
-      label: "LINT",
-      color: "#ffaa00",
-      icon: "check",
-    });
-    assert.equal(action.id, "lint");
-    assert.equal(action.name, "Lint");
-    assert.equal(action.category, "custom");
-    assert.equal(action.payload.prompt, "Run the linter");
-    assert.equal(action.defaultState.label, "LINT");
-    assert.equal(action.defaultState.color, "#ffaa00");
+    assert.ok(cats.question);
+    assert.ok(cats.permission);
   });
 });
 
