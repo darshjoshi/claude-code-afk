@@ -203,11 +203,10 @@ function installStatuslineScript(options = {}) {
 
   const script = `#!/bin/bash
 # Stream Deck bridge statusline forwarder
-# Reads JSON from stdin (Claude Code statusline) and POSTs to the bridge
-INPUT=$(cat)
+# Pipes JSON from stdin (Claude Code statusline) directly to the bridge
 curl -s -X POST "${baseUrl}/hooks/statusline" \\
   -H "Content-Type: application/json" \\
-  -d "{\\"context_window\\": $INPUT}" \\
+  --data-binary @- \\
   > /dev/null 2>&1
 `;
 
