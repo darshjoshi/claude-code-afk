@@ -189,7 +189,7 @@ class HookReceiver extends EventEmitter {
             }
           },
         });
-        this._updateBridgeState(event, data);
+        // Per-session alert handles the visual feedback — skip legacy respondAlert
         break;
       }
 
@@ -238,8 +238,10 @@ class HookReceiver extends EventEmitter {
             message: data.message,
             cwd: data.cwd,
           });
+          // Per-session tracking handles notifications — skip legacy respondAlert
+          this._respondOk(res);
+          break;
         }
-        // Also update bridge state for backward compat
         this._updateBridgeState(event, data);
         this._respondOk(res);
         break;
@@ -311,7 +313,7 @@ class HookReceiver extends EventEmitter {
       case "notification": {
         // Only alert for notification types that require user input
         const notificationType = data.raw?.notification_type;
-        const needsInput = !notificationType ||
+        const needsInput =
           notificationType === "permission_prompt" ||
           notificationType === "idle_prompt" ||
           notificationType === "elicitation_dialog";

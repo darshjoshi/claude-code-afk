@@ -646,6 +646,9 @@ class StreamDeckAdapter extends EventEmitter {
       this.sessionTracker.resolvePendingPermission(sessionId, "deny", "denied by user");
     }
 
+    // Clean up any orphaned legacy respondAlert
+    this.dismissRespondAlert();
+
     // Navigate back to sessions
     this.layoutManager.switchView("sessions");
     this._refreshAllButtons();
@@ -659,6 +662,9 @@ class StreamDeckAdapter extends EventEmitter {
 
     const answer = context?.meta?.answer;
     this.sessionTracker.resolveQuestion(sessionId, answer);
+
+    // Clean up any orphaned legacy respondAlert
+    this.dismissRespondAlert();
 
     // Navigate back to sessions
     this.layoutManager.switchView("sessions");
