@@ -350,6 +350,7 @@ class StreamDeckAdapter extends EventEmitter {
 
     this.sessionTracker.on("question:resolved", ({ sessionId }) => {
       this.alertManager.clearAlert(`session:${sessionId}`);
+      this.dismissRespondAlert();
       this.infobarManager.stopAnimation();
       this.infobarManager.onSystemStateChange("active");
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
@@ -364,6 +365,7 @@ class StreamDeckAdapter extends EventEmitter {
 
     this.sessionTracker.on("question:timeout", ({ sessionId }) => {
       this.alertManager.clearAlert(`session:${sessionId}`);
+      this.dismissRespondAlert();
       this.infobarManager.stopAnimation();
       this.infobarManager.onSystemStateChange("active");
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
