@@ -225,10 +225,12 @@ class HookReceiver extends EventEmitter {
 
       case "prompt-submit":
         if (sessionId) {
-          // User responded in terminal — resolve any pending question
+          // User responded in terminal — resolve any pending question or permission
           this.sessionTracker.resolveQuestion(sessionId);
+          this.sessionTracker.resolvePendingPermission(sessionId, "allow");
           this.sessionTracker.updateStatus(sessionId, event, { cwd: data.cwd });
         }
+        this._updateBridgeState(event, data);
         this._respondOk(res);
         break;
 

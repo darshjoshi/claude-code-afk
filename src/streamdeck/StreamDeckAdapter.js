@@ -362,6 +362,20 @@ class StreamDeckAdapter extends EventEmitter {
       this._refreshAllButtons();
     });
 
+    this.sessionTracker.on("question:timeout", ({ sessionId }) => {
+      this.alertManager.clearAlert(`session:${sessionId}`);
+      this.infobarManager.stopAnimation();
+      this.infobarManager.onSystemStateChange("active");
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (
+        this.layoutManager.currentView === "question" &&
+        this.layoutManager.focusedSessionId === sessionId
+      ) {
+        this.layoutManager.switchView("sessions");
+      }
+      this._refreshAllButtons();
+    });
+
     this.sessionTracker.on("session:stale", ({ sessionId }) => {
       this.alertManager.startAlert(`session:${sessionId}`, {
         reason: "stale",
