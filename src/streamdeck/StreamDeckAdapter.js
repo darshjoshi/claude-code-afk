@@ -350,6 +350,22 @@ class StreamDeckAdapter extends EventEmitter {
 
     this.sessionTracker.on("question:resolved", ({ sessionId }) => {
       this.alertManager.clearAlert(`session:${sessionId}`);
+      this.dismissRespondAlert();
+      this.infobarManager.stopAnimation();
+      this.infobarManager.onSystemStateChange("active");
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (
+        this.layoutManager.currentView === "question" &&
+        this.layoutManager.focusedSessionId === sessionId
+      ) {
+        this.layoutManager.switchView("sessions");
+      }
+      this._refreshAllButtons();
+    });
+
+    this.sessionTracker.on("question:timeout", ({ sessionId }) => {
+      this.alertManager.clearAlert(`session:${sessionId}`);
+      this.dismissRespondAlert();
       this.infobarManager.stopAnimation();
       this.infobarManager.onSystemStateChange("active");
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
@@ -646,6 +662,9 @@ class StreamDeckAdapter extends EventEmitter {
       this.sessionTracker.resolvePendingPermission(sessionId, "deny", "denied by user");
     }
 
+    // Clean up any orphaned legacy respondAlert
+    this.dismissRespondAlert();
+
     // Navigate back to sessions
     this.layoutManager.switchView("sessions");
     this._refreshAllButtons();
@@ -659,6 +678,9 @@ class StreamDeckAdapter extends EventEmitter {
 
     const answer = context?.meta?.answer;
     this.sessionTracker.resolveQuestion(sessionId, answer);
+
+    // Clean up any orphaned legacy respondAlert
+    this.dismissRespondAlert();
 
     // Navigate back to sessions
     this.layoutManager.switchView("sessions");
