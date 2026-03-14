@@ -135,7 +135,7 @@ class SessionTracker extends EventEmitter {
    * @param {object} opts.body - Original hook body
    * @param {Function} opts.resolve - Callback: (responseObj) => void  — writes HTTP response
    */
-  setPendingPermission(id, { tool, body, resolve }) {
+  setPendingPermission(id, { tool, hookEvent, body, resolve }) {
     let session = this._sessions.get(id);
     if (!session) session = this.registerSession(id);
 
@@ -144,15 +144,8 @@ class SessionTracker extends EventEmitter {
       this._resolvePermissionCallback(session, "allow", "superseded by new request");
     }
 
-    const timeout = setTimeout(() => {
-      if (session.pendingPermission) {
-        this._resolvePermissionCallback(session, "allow", "timeout");
-        this.emit("permission:timeout", { sessionId: id, tool });
-      }
-    }, this._responseTimeoutMs);
-    if (timeout.unref) timeout.unref();
-
-    session.pendingPermission = { tool, body, resolve, timeout };
+    // No timeout — permission waits indefinitely until the user decides
+    session.pendingPermission = { tool, hookEvent, body, resolve };
     session.status = "permission";
 
     this.emit("permission:pending", { sessionId: id, tool, body });
@@ -177,7 +170,7 @@ class SessionTracker extends EventEmitter {
     const pending = session.pendingPermission;
     if (!pending) return;
 
-    clearTimeout(pending.timeout);
+    if (pending.timeout) clearTimeout(pending.timeout);
 
     // PermissionRequest hook uses a different response format than PreToolUse
     const hookEvent = pending.hookEvent || "PreToolUse";
@@ -300,8 +293,12 @@ class SessionTracker extends EventEmitter {
   _cleanupStale() {
     const now = Date.now();
     for (const [id, session] of this._sessions) {
-      if (now - session.lastEventTime > this._staleThresholdMs) {
-        this.removeSession(id);
+      if (
+        session.status !== "stale" &&
+        now - session.lastEventTime > this._staleThresholdMs
+      ) {
+        session.status = "stale";
+        this.emit("session:stale", { sessionId: id });
       }
     }
   }

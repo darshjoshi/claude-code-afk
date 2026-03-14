@@ -282,6 +282,10 @@ class StreamDeckAdapter extends EventEmitter {
     });
 
     this.sessionTracker.on("session:updated", ({ sessionId, session, event }) => {
+      // Clear stale alert if session is active again
+      if (session.status !== "stale") {
+        this.alertManager.clearAlert(`session:${sessionId}`);
+      }
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
       if (this.layoutManager.currentView === "sessions") {
         this._refreshAllButtons();
@@ -350,6 +354,21 @@ class StreamDeckAdapter extends EventEmitter {
         this.layoutManager.switchView("sessions");
       }
       this._refreshAllButtons();
+    });
+
+    this.sessionTracker.on("session:stale", ({ sessionId }) => {
+      this.alertManager.startAlert(`session:${sessionId}`, {
+        reason: "stale",
+        label: sessionId.slice(-4),
+        sublabel: "Idle",
+        onColor: "#006666",
+        offColor: "#002222",
+        icon: "clock",
+      });
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (this.layoutManager.currentView === "sessions") {
+        this._refreshAllButtons();
+      }
     });
   }
 
@@ -764,6 +783,7 @@ class StreamDeckAdapter extends EventEmitter {
       waiting: "#ffcc00",
       attention: "#ffcc00",
       permission: "#ff6600",
+      stale: "#006666",
       offline: "#333333",
     };
     return {
