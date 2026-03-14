@@ -1,5 +1,5 @@
 const { EventEmitter } = require("events");
-const { getAction, getLayout } = require("./actions");
+const { getLayout } = require("./actions");
 
 /**
  * Manages "views" (pages) on the Stream Deck.
