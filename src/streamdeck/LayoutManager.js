@@ -1,14 +1,14 @@
 const { EventEmitter } = require("events");
-const { getAction, getLayout } = require("./actions");
+const { getLayout } = require("./actions");
 
 /**
  * Manages "views" (pages) on the Stream Deck.
  *
  * Four views:
- *   1. default   — The original layout (prompts, git, etc.) + a SESSIONS nav button
+ *   1. default   — The original layout (session control buttons) + a SESSIONS nav button
  *   2. sessions  — Grid of active sessions as buttons, each showing live status
  *   3. permission — ALLOW / ALLOW SESSION / DENY buttons for a focused session
- *   4. question  — Question text + FOCUS TERMINAL for a focused session
+ *   4. question  — Yes/No/Continue/Skip + FOCUS TERMINAL for a focused session
  *
  * Each view dynamically computes which action goes on which key, so the
  * StreamDeckAdapter can just ask "what does key 5 do right now?"
@@ -139,10 +139,9 @@ class LayoutManager extends EventEmitter {
       }
     }
 
-    // Replace one key with SESSIONS nav if there are active sessions
-    // Use the last key position
+    // Add SESSIONS nav to the last key if it's not already occupied
     const totalKeys = this._device.keys || 15;
-    if (this._sessions.length > 0) {
+    if (this._sessions.length > 0 && !map[totalKeys - 1]) {
       map[totalKeys - 1] = { actionId: "sessionsView", sessionId: null, meta: null };
     }
 
@@ -257,8 +256,36 @@ class LayoutManager extends EventEmitter {
       meta: { isQuestion: true },
     };
 
-    // Key 1: FOCUS TERMINAL
+    // Key 1: YES
     map[1] = {
+      actionId: "answerYes",
+      sessionId: this._focusedSessionId,
+      meta: { answer: "yes" },
+    };
+
+    // Key 2: NO
+    map[2] = {
+      actionId: "answerNo",
+      sessionId: this._focusedSessionId,
+      meta: { answer: "no" },
+    };
+
+    // Key 3: CONTINUE
+    map[3] = {
+      actionId: "answerContinue",
+      sessionId: this._focusedSessionId,
+      meta: { answer: "continue" },
+    };
+
+    // Key 4: SKIP
+    map[4] = {
+      actionId: "answerSkip",
+      sessionId: this._focusedSessionId,
+      meta: { answer: "skip" },
+    };
+
+    // Key 5: FOCUS TERMINAL (for Whispr Flow typing)
+    map[5] = {
       actionId: "focusTerminal",
       sessionId: this._focusedSessionId,
       meta: null,

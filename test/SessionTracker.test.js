@@ -78,6 +78,20 @@ describe("SessionTracker", () => {
       tracker.updateStatus("unknown1", "pre-tool-use", { tool: "Read" });
       assert.ok(tracker.getSession("unknown1"));
     });
+
+    it("stores cwd from status updates", () => {
+      tracker.registerSession("s1");
+      assert.equal(tracker.getSession("s1").cwd, null);
+      tracker.updateStatus("s1", "session-start", { cwd: "/home/user/project" });
+      assert.equal(tracker.getSession("s1").cwd, "/home/user/project");
+    });
+
+    it("does not overwrite cwd with null", () => {
+      tracker.registerSession("s1");
+      tracker.updateStatus("s1", "session-start", { cwd: "/home/user/project" });
+      tracker.updateStatus("s1", "pre-tool-use", { tool: "Bash" });
+      assert.equal(tracker.getSession("s1").cwd, "/home/user/project");
+    });
   });
 
   describe("permission management", () => {
@@ -94,7 +108,13 @@ describe("SessionTracker", () => {
       assert.equal(tracker.getSession("s1").status, "permission");
 
       tracker.resolvePendingPermission("s1", "allow");
-      assert.deepEqual(resolved, { decision: "allow" });
+      assert.deepEqual(resolved, {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+          permissionDecisionReason: "",
+        },
+      });
       assert.equal(tracker.getSession("s1").pendingPermission, null);
     });
 
@@ -108,7 +128,13 @@ describe("SessionTracker", () => {
       });
 
       tracker.resolvePendingPermission("s1", "deny", "not allowed");
-      assert.deepEqual(resolved, { decision: "deny", reason: "not allowed" });
+      assert.deepEqual(resolved, {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: "not allowed",
+        },
+      });
     });
 
     it("emits permission events", () => {
@@ -148,7 +174,13 @@ describe("SessionTracker", () => {
       });
 
       // First should have been auto-allowed
-      assert.deepEqual(first, { decision: "allow" });
+      assert.deepEqual(first, {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "allow",
+          permissionDecisionReason: "superseded by new request",
+        },
+      });
       // Second is still pending
       assert.ok(tracker.getSession("s1").pendingPermission);
       assert.equal(tracker.getSession("s1").pendingPermission.tool, "Read");
@@ -162,7 +194,7 @@ describe("SessionTracker", () => {
       assert.equal(tracker.hasSessionApproval("s1", "Read"), false);
     });
 
-    it("times out held permissions", async () => {
+    it("does NOT time out held permissions (waits indefinitely)", async () => {
       tracker = new SessionTracker({ responseTimeoutMs: 50, cleanupIntervalMs: 60000 });
       tracker.registerSession("s1");
       let resolved = null;
@@ -176,8 +208,12 @@ describe("SessionTracker", () => {
       });
 
       await new Promise((r) => setTimeout(r, 100));
-      assert.deepEqual(resolved, { decision: "allow" });
-      assert.equal(timedOut, true);
+      // Permission should still be pending — no auto-allow on timeout
+      assert.equal(resolved, null);
+      assert.equal(timedOut, false);
+      const session = tracker.getSession("s1");
+      assert.equal(session.status, "permission");
+      assert.notEqual(session.pendingPermission, null);
       tracker.destroy();
     });
   });
@@ -233,6 +269,34 @@ describe("SessionTracker", () => {
   });
 
   describe("cleanup", () => {
+    it("does not mark sessions stale while permission is pending", () => {
+      tracker = new SessionTracker({
+        responseTimeoutMs: 500,
+        staleThresholdMs: 50,
+        cleanupIntervalMs: 60000,
+      });
+      tracker.registerSession("s1");
+      tracker.setPendingPermission("s1", {
+        tool: "Bash",
+        body: {},
+        resolve: () => {},
+      });
+
+      // Backdate lastEventTime to exceed stale threshold
+      const session = tracker.getSession("s1");
+      session.lastEventTime = Date.now() - 100;
+
+      let staleEmitted = false;
+      tracker.on("session:stale", () => (staleEmitted = true));
+
+      // Manually trigger cleanup
+      tracker._cleanupStale();
+
+      assert.equal(session.status, "permission");
+      assert.equal(staleEmitted, false);
+      tracker.destroy();
+    });
+
     it("resolves pending callbacks on remove", () => {
       tracker.registerSession("s1");
       let resolved = null;
@@ -242,7 +306,7 @@ describe("SessionTracker", () => {
         resolve: (r) => (resolved = r),
       });
       tracker.removeSession("s1");
-      assert.deepEqual(resolved, { decision: "allow" });
+      assert.equal(resolved.hookSpecificOutput.permissionDecision, "allow");
     });
 
     it("resolves all on destroy", () => {
@@ -254,7 +318,7 @@ describe("SessionTracker", () => {
         resolve: (r) => (resolved = r),
       });
       tracker.destroy();
-      assert.deepEqual(resolved, { decision: "allow" });
+      assert.equal(resolved.hookSpecificOutput.permissionDecision, "allow");
       assert.equal(tracker.sessionCount, 0);
     });
   });

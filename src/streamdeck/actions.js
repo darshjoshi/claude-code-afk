@@ -1,5 +1,5 @@
 /**
- * Stream Deck action definitions for Claude Code control.
+ * Stream Deck action definitions for Claude Code session control.
  *
  * Three input types supported:
  *   - key:   LCD button press (all models)
@@ -55,112 +55,11 @@ const KEY_ACTIONS = {
     handler: "dismissAlert",
   },
 
-  // ── Quick Prompts ──────────────────────────────────────────
-  reviewCode: {
-    id: "reviewCode",
-    name: "Review Code",
-    description: "Ask Claude to review uncommitted changes",
-    inputType: "key",
-    category: "prompt",
-    defaultState: { label: "REVIEW", color: "#9966ff", icon: "eye" },
-    handler: "sendPrompt",
-    payload: {
-      prompt:
-        "Review my uncommitted changes. Focus on bugs, security issues, and improvements. Be concise.",
-      allowedTools: ["Read", "Bash", "Glob", "Grep"],
-    },
-  },
-
-  fixBugs: {
-    id: "fixBugs",
-    name: "Fix Bugs",
-    description: "Ask Claude to find and fix bugs in recent changes",
-    inputType: "key",
-    category: "prompt",
-    defaultState: { label: "FIX", color: "#cc0000", icon: "bug" },
-    handler: "sendPrompt",
-    payload: {
-      prompt:
-        "Look at my recent changes and fix any bugs you find. Run the tests afterward.",
-    },
-  },
-
-  writeTests: {
-    id: "writeTests",
-    name: "Write Tests",
-    description: "Ask Claude to write tests for recent changes",
-    inputType: "key",
-    category: "prompt",
-    defaultState: { label: "TESTS", color: "#00cc88", icon: "check" },
-    handler: "sendPrompt",
-    payload: {
-      prompt:
-        "Write tests for the most recently changed files. Follow existing test patterns.",
-    },
-  },
-
-  explain: {
-    id: "explain",
-    name: "Explain Code",
-    description: "Ask Claude to explain the current project or recent changes",
-    inputType: "key",
-    category: "prompt",
-    defaultState: { label: "EXPLAIN", color: "#4488ff", icon: "book" },
-    handler: "sendPrompt",
-    payload: {
-      prompt:
-        "Explain what this project does and summarize the most recent changes. Be concise.",
-      allowedTools: ["Read", "Glob", "Grep"],
-    },
-  },
-
-  commit: {
-    id: "commit",
-    name: "Commit",
-    description: "Ask Claude to commit staged changes with a good message",
-    inputType: "key",
-    category: "prompt",
-    defaultState: { label: "COMMIT", color: "#ff9900", icon: "git" },
-    handler: "sendPrompt",
-    payload: {
-      prompt:
-        "Create a git commit for my staged changes with an appropriate commit message.",
-    },
-  },
-
-  refactor: {
-    id: "refactor",
-    name: "Refactor",
-    description: "Ask Claude to refactor the most recently changed code",
-    inputType: "key",
-    category: "prompt",
-    defaultState: { label: "REFACTR", color: "#cc88ff", icon: "compress" },
-    handler: "sendPrompt",
-    payload: {
-      prompt:
-        "Refactor the most recently changed files for clarity, performance, and maintainability.",
-    },
-  },
-
-  runTests: {
-    id: "runTests",
-    name: "Run Tests",
-    description: "Ask Claude to run the test suite and report results",
-    inputType: "key",
-    category: "prompt",
-    defaultState: { label: "RUN", color: "#00aa66", icon: "check" },
-    handler: "sendPrompt",
-    payload: {
-      prompt: "Run the test suite and report results. If any tests fail, show why.",
-      allowedTools: ["Bash"],
-    },
-  },
-
   // ── Session Control ────────────────────────────────────────
   abort: {
     id: "abort",
     name: "Abort",
-    description: "Abort the currently running Claude command",
+    description: "Deny pending permission or dismiss question on focused session",
     inputType: "key",
     category: "control",
     defaultState: { label: "ABORT", color: "#cc0000", icon: "stop" },
@@ -175,19 +74,6 @@ const KEY_ACTIONS = {
     category: "control",
     defaultState: { label: "NEW", color: "#ffffff", icon: "plus" },
     handler: "resetSession",
-  },
-
-  compact: {
-    id: "compact",
-    name: "Compact",
-    description: "Ask Claude to compact the conversation context",
-    inputType: "key",
-    category: "control",
-    defaultState: { label: "COMPACT", color: "#888888", icon: "compress" },
-    handler: "sendPrompt",
-    payload: {
-      prompt: "Please compact the conversation to save context.",
-    },
   },
 
   // ── Session & Permission Control ──────────────────────────
@@ -291,62 +177,45 @@ const KEY_ACTIONS = {
     handler: "nextPage",
   },
 
-  // ── Custom Prompt ──────────────────────────────────────────
-  customPrompt: {
-    id: "customPrompt",
-    name: "Custom Prompt",
-    description: "Send a user-configured custom prompt",
+  // ── Question Response Actions ──────────────────────────────
+  answerYes: {
+    id: "answerYes",
+    name: "Answer Yes",
+    description: "Answer YES to Claude's question",
     inputType: "key",
-    category: "prompt",
-    defaultState: { label: "CUSTOM", color: "#666666", icon: "message" },
-    handler: "sendPrompt",
-    payload: {
-      prompt: "",
-    },
+    category: "question",
+    defaultState: { label: "YES", color: "#00cc66", icon: "check" },
+    handler: "answerQuestion",
   },
 
-  // ── Git Operations ─────────────────────────────────────────
-  gitStatus: {
-    id: "gitStatus",
-    name: "Git Status",
-    description: "Ask Claude for a git status summary",
+  answerNo: {
+    id: "answerNo",
+    name: "Answer No",
+    description: "Answer NO to Claude's question",
     inputType: "key",
-    category: "git",
-    defaultState: { label: "STATUS", color: "#ff6633", icon: "git" },
-    handler: "sendPrompt",
-    payload: {
-      prompt:
-        "Show me a brief git status summary: branch, staged, unstaged, untracked counts.",
-      allowedTools: ["Bash"],
-    },
+    category: "question",
+    defaultState: { label: "NO", color: "#cc0000", icon: "stop" },
+    handler: "answerQuestion",
   },
 
-  gitDiff: {
-    id: "gitDiff",
-    name: "Git Diff",
-    description: "Ask Claude to summarize the current diff",
+  answerContinue: {
+    id: "answerContinue",
+    name: "Answer Continue",
+    description: "Answer CONTINUE to Claude's question",
     inputType: "key",
-    category: "git",
-    defaultState: { label: "DIFF", color: "#ff6633", icon: "diff" },
-    handler: "sendPrompt",
-    payload: {
-      prompt: "Summarize the current git diff in bullet points. Be concise.",
-      allowedTools: ["Bash"],
-    },
+    category: "question",
+    defaultState: { label: "CONTINUE", color: "#4488ff", icon: "circle" },
+    handler: "answerQuestion",
   },
 
-  gitPush: {
-    id: "gitPush",
-    name: "Git Push",
-    description: "Ask Claude to push current branch to origin",
+  answerSkip: {
+    id: "answerSkip",
+    name: "Answer Skip",
+    description: "Answer SKIP to Claude's question",
     inputType: "key",
-    category: "git",
-    defaultState: { label: "PUSH", color: "#ff6633", icon: "git" },
-    handler: "sendPrompt",
-    payload: {
-      prompt: "Push the current branch to origin.",
-      allowedTools: ["Bash"],
-    },
+    category: "question",
+    defaultState: { label: "SKIP", color: "#888888", icon: "circle" },
+    handler: "answerQuestion",
   },
 };
 
@@ -355,35 +224,6 @@ const KEY_ACTIONS = {
  * Dials support: rotate (CW/CCW), press, and touch.
  */
 const DIAL_ACTIONS = {
-  scrollContext: {
-    id: "scrollContext",
-    name: "Scroll Context",
-    description: "Rotate to scroll through Claude's last response",
-    inputType: "dial",
-    category: "control",
-    defaultState: { label: "SCROLL", color: "#4488ff" },
-    handler: "scrollResponse",
-    onRotate: "scrollResponse",
-    onPress: "resetScroll",
-  },
-
-  modelSelect: {
-    id: "modelSelect",
-    name: "Model Selector",
-    description: "Rotate to cycle between Claude models",
-    inputType: "dial",
-    category: "control",
-    defaultState: { label: "MODEL", color: "#9966ff" },
-    handler: "cycleModel",
-    onRotate: "cycleModel",
-    onPress: "confirmModel",
-    options: [
-      "claude-opus-4-6",
-      "claude-sonnet-4-6",
-      "claude-haiku-4-5-20251001",
-    ],
-  },
-
   volume: {
     id: "volume",
     name: "Notification Volume",
@@ -397,21 +237,6 @@ const DIAL_ACTIONS = {
     min: 0,
     max: 100,
     step: 5,
-  },
-
-  maxTurns: {
-    id: "maxTurns",
-    name: "Max Turns",
-    description: "Rotate to set max agentic turns for next prompt",
-    inputType: "dial",
-    category: "control",
-    defaultState: { label: "TURNS", color: "#ffcc00" },
-    handler: "setMaxTurns",
-    onRotate: "setMaxTurns",
-    onPress: "resetMaxTurns",
-    min: 1,
-    max: 50,
-    step: 1,
   },
 };
 
@@ -505,11 +330,6 @@ const TOUCH_ACTIONS = {
 
 /**
  * Touch point LED configuration for Neo's left/right touch buttons.
- * Each touch point can have a static or dynamic LED color.
- *
- * The Neo hardware supports setting LED brightness and color on
- * each touch point via the Elgato SDK. This bridge communicates
- * LED state to the Stream Deck plugin via WebSocket.
  */
 const TOUCH_POINT_STYLES = {
   // Static presets
@@ -577,8 +397,8 @@ const ACTIONS = {
 
 /**
  * Default layouts for every Stream Deck model.
- * Each layout maps input indices to action IDs.
- * Layout keys use the `keys` map; dials in `dials`; pedals in `pedals`.
+ * Session-control focused: status, alerts, session management, navigation.
+ * Dynamic keys (row 1) are filled by LayoutManager when viewing sessions.
  */
 const LAYOUTS = {
   mini: {
@@ -587,10 +407,10 @@ const LAYOUTS = {
     keys: {
       0: "status",
       1: "respondAlert",
-      2: "reviewCode",
+      2: "sessionsView",
       3: "abort",
-      4: "commit",
-      5: "newSession",
+      4: "focusTerminal",
+      5: "backButton",
     },
   },
 
@@ -600,12 +420,12 @@ const LAYOUTS = {
     keys: {
       0: "status",
       1: "respondAlert",
-      2: "reviewCode",
-      3: "fixBugs",
+      2: "toolIndicator",
+      3: "sessionsView",
       4: "abort",
-      5: "commit",
-      6: "newSession",
-      7: "customPrompt",
+      5: "focusTerminal",
+      6: "backButton",
+      7: null,
     },
     touchPoints: {
       0: "prevPage",
@@ -621,18 +441,18 @@ const LAYOUTS = {
       0: "status",
       1: "respondAlert",
       2: "toolIndicator",
-      3: "gitStatus",
-      4: "gitDiff",
-      5: "reviewCode",
-      6: "fixBugs",
-      7: "writeTests",
-      8: "explain",
-      9: "customPrompt",
+      3: "sessionsView",
+      4: "focusTerminal",
+      5: null,
+      6: null,
+      7: null,
+      8: null,
+      9: null,
       10: "abort",
-      11: "newSession",
-      12: "compact",
-      13: "commit",
-      14: "runTests",
+      11: "backButton",
+      12: null,
+      13: "prevPage",
+      14: "nextPage",
     },
   },
 
@@ -643,18 +463,18 @@ const LAYOUTS = {
       0: "status",
       1: "respondAlert",
       2: "toolIndicator",
-      3: "gitStatus",
-      4: "gitDiff",
-      5: "reviewCode",
-      6: "fixBugs",
-      7: "writeTests",
-      8: "explain",
-      9: "customPrompt",
+      3: "sessionsView",
+      4: "focusTerminal",
+      5: null,
+      6: null,
+      7: null,
+      8: null,
+      9: null,
       10: "abort",
-      11: "newSession",
-      12: "compact",
-      13: "commit",
-      14: "runTests",
+      11: "backButton",
+      12: null,
+      13: "prevPage",
+      14: "nextPage",
     },
   },
 
@@ -664,18 +484,18 @@ const LAYOUTS = {
     keys: {
       0: "status",
       1: "respondAlert",
-      2: "fixBugs",
-      3: "writeTests",
+      2: "toolIndicator",
+      3: "sessionsView",
       4: "abort",
-      5: "commit",
-      6: "newSession",
-      7: "customPrompt",
+      5: "focusTerminal",
+      6: "backButton",
+      7: null,
     },
     dials: {
-      0: "scrollContext",
-      1: "modelSelect",
-      2: "maxTurns",
-      3: "volume",
+      0: "volume",
+      1: null,
+      2: null,
+      3: null,
     },
     touchStrip: "contextBar",
   },
@@ -687,34 +507,35 @@ const LAYOUTS = {
       0: "status",
       1: "respondAlert",
       2: "toolIndicator",
-      4: null,
+      3: "sessionsView",
+      4: "focusTerminal",
       5: null,
-      6: "gitStatus",
-      7: "gitDiff",
-      8: "reviewCode",
-      9: "fixBugs",
-      10: "writeTests",
-      11: "explain",
-      12: "refactor",
+      6: null,
+      7: null,
+      8: null,
+      9: null,
+      10: null,
+      11: null,
+      12: null,
       13: null,
       14: null,
-      15: "customPrompt",
-      16: "commit",
-      17: "gitPush",
-      18: "runTests",
+      15: null,
+      16: null,
+      17: null,
+      18: null,
       19: null,
       20: null,
       21: null,
       22: null,
       23: null,
       24: "abort",
-      25: "newSession",
-      26: "compact",
+      25: "backButton",
+      26: null,
       27: null,
       28: null,
       29: null,
-      30: null,
-      31: null,
+      30: "prevPage",
+      31: "nextPage",
     },
   },
 
@@ -725,24 +546,24 @@ const LAYOUTS = {
       0: "status",
       1: "respondAlert",
       2: "toolIndicator",
-      3: null,
-      4: null,
+      3: "sessionsView",
+      4: "focusTerminal",
       5: null,
-      6: "gitStatus",
-      7: "gitDiff",
+      6: null,
+      7: null,
       8: null,
-      9: "reviewCode",
-      10: "fixBugs",
-      11: "writeTests",
-      12: "explain",
-      13: "refactor",
+      9: null,
+      10: null,
+      11: null,
+      12: null,
+      13: null,
       14: null,
       15: null,
-      16: "customPrompt",
+      16: null,
       17: null,
-      18: "commit",
-      19: "gitPush",
-      20: "runTests",
+      18: null,
+      19: null,
+      20: null,
       21: null,
       22: null,
       23: null,
@@ -750,20 +571,20 @@ const LAYOUTS = {
       25: null,
       26: null,
       27: "abort",
-      28: "newSession",
-      29: "compact",
+      28: "backButton",
+      29: null,
       30: null,
       31: null,
       32: null,
       33: null,
-      34: null,
-      35: null,
+      34: "prevPage",
+      35: "nextPage",
     },
     dials: {
-      0: "scrollContext",
-      1: "modelSelect",
-      2: "maxTurns",
-      3: "volume",
+      0: "volume",
+      1: null,
+      2: null,
+      3: null,
       4: null,
       5: null,
     },
@@ -777,38 +598,39 @@ const LAYOUTS = {
       0: "status",
       1: "respondAlert",
       2: "toolIndicator",
-      4: null,
+      3: "sessionsView",
+      4: "focusTerminal",
       5: null,
-      6: "gitStatus",
-      7: "gitDiff",
-      8: "reviewCode",
-      9: "fixBugs",
-      10: "writeTests",
-      11: "explain",
-      12: "refactor",
+      6: null,
+      7: null,
+      8: null,
+      9: null,
+      10: null,
+      11: null,
+      12: null,
       13: null,
       14: null,
-      15: "customPrompt",
-      16: "commit",
-      17: "gitPush",
-      18: "runTests",
+      15: null,
+      16: null,
+      17: null,
+      18: null,
       19: null,
       20: null,
       21: null,
       22: null,
       23: null,
       24: "abort",
-      25: "newSession",
-      26: "compact",
+      25: "backButton",
+      26: null,
       27: null,
       28: null,
       29: null,
-      30: null,
-      31: null,
+      30: "prevPage",
+      31: "nextPage",
     },
     dials: {
-      0: "scrollContext",
-      1: "modelSelect",
+      0: "volume",
+      1: null,
     },
   },
 
@@ -829,26 +651,27 @@ const LAYOUTS = {
       0: "status",
       1: "respondAlert",
       2: "toolIndicator",
-      4: null,
+      3: "sessionsView",
+      4: "focusTerminal",
       5: null,
-      6: "gitStatus",
-      7: "gitDiff",
-      8: "reviewCode",
-      9: "fixBugs",
-      10: "writeTests",
-      11: "explain",
-      12: "refactor",
-      13: "runTests",
+      6: null,
+      7: null,
+      8: null,
+      9: null,
+      10: null,
+      11: null,
+      12: null,
+      13: null,
       14: null,
-      15: "customPrompt",
-      16: "commit",
-      17: "gitPush",
+      15: null,
+      16: null,
+      17: null,
       18: null,
       19: null,
-      20: null,
-      21: null,
-      22: null,
-      23: null,
+      20: "abort",
+      21: "backButton",
+      22: "prevPage",
+      23: "nextPage",
     },
   },
 };
@@ -883,7 +706,7 @@ function listCategories() {
 }
 
 /**
- * Create a custom action (user-defined prompt button).
+ * Create a custom action (user-defined button).
  */
 function createCustomAction(id, options) {
   return {
@@ -897,11 +720,8 @@ function createCustomAction(id, options) {
       color: options.color || "#666666",
       icon: options.icon || "message",
     },
-    handler: "sendPrompt",
-    payload: {
-      prompt: options.prompt || "",
-      allowedTools: options.allowedTools || [],
-    },
+    handler: options.handler || null,
+    payload: options.prompt ? { prompt: options.prompt } : undefined,
   };
 }
 

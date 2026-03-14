@@ -7,14 +7,15 @@ const { EventEmitter } = require("events");
  * When a PreToolUse hook arrives, the HTTP response can be "held" here so
  * the user can approve/deny from the Stream Deck before Claude proceeds.
  *
- * Auto-cleans stale sessions and enforces timeouts on held responses.
+ * Marks sessions as stale after inactivity (never removes them).
+ * Permissions wait indefinitely — no auto-allow on timeout.
  */
 class SessionTracker extends EventEmitter {
   constructor(options = {}) {
     super();
     this._sessions = new Map();
     this._responseTimeoutMs = options.responseTimeoutMs || 25000;
-    this._staleThresholdMs = options.staleThresholdMs || 5 * 60 * 1000;
+    this._staleThresholdMs = options.staleThresholdMs || 60 * 60 * 1000;
     this._cleanupIntervalMs = options.cleanupIntervalMs || 60000;
 
     this._cleanupTimer = setInterval(() => this._cleanupStale(), this._cleanupIntervalMs);
@@ -36,6 +37,7 @@ class SessionTracker extends EventEmitter {
       pendingQuestion: null,
       sessionApprovals: new Set(),
       label: id.length >= 4 ? id.slice(-4) : id,
+      cwd: null,
     };
 
     this._sessions.set(id, session);
@@ -82,6 +84,8 @@ class SessionTracker extends EventEmitter {
 
     session.lastEvent = event;
     session.lastEventTime = Date.now();
+
+    if (data.cwd) session.cwd = data.cwd;
 
     if (event === "pre-tool-use" && data.tool) {
       session.currentTool = data.tool;
@@ -132,7 +136,7 @@ class SessionTracker extends EventEmitter {
    * @param {object} opts.body - Original hook body
    * @param {Function} opts.resolve - Callback: (responseObj) => void  — writes HTTP response
    */
-  setPendingPermission(id, { tool, body, resolve }) {
+  setPendingPermission(id, { tool, hookEvent, body, resolve }) {
     let session = this._sessions.get(id);
     if (!session) session = this.registerSession(id);
 
@@ -141,15 +145,8 @@ class SessionTracker extends EventEmitter {
       this._resolvePermissionCallback(session, "allow", "superseded by new request");
     }
 
-    const timeout = setTimeout(() => {
-      if (session.pendingPermission) {
-        this._resolvePermissionCallback(session, "allow", "timeout");
-        this.emit("permission:timeout", { sessionId: id, tool });
-      }
-    }, this._responseTimeoutMs);
-    if (timeout.unref) timeout.unref();
-
-    session.pendingPermission = { tool, body, resolve, timeout };
+    // No timeout — permission waits indefinitely until the user decides
+    session.pendingPermission = { tool, hookEvent, body, resolve };
     session.status = "permission";
 
     this.emit("permission:pending", { sessionId: id, tool, body });
@@ -174,11 +171,27 @@ class SessionTracker extends EventEmitter {
     const pending = session.pendingPermission;
     if (!pending) return;
 
-    clearTimeout(pending.timeout);
-
-    const response = { decision };
-    if (decision === "deny" && reason) {
-      response.reason = reason;
+    // PermissionRequest hook uses a different response format than PreToolUse
+    const hookEvent = pending.hookEvent || "PreToolUse";
+    let response;
+    if (hookEvent === "PermissionRequest") {
+      response = {
+        hookSpecificOutput: {
+          hookEventName: "PermissionRequest",
+          decision: {
+            behavior: decision === "allow" ? "allow" : "deny",
+            message: reason || "",
+          },
+        },
+      };
+    } else {
+      response = {
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: decision,
+          permissionDecisionReason: reason || "",
+        },
+      };
     }
 
     try {
@@ -220,24 +233,31 @@ class SessionTracker extends EventEmitter {
 
   /**
    * Resolve a pending question (acknowledge, release HTTP response).
+   * @param {string} id - Session ID
+   * @param {string} [answer] - The user's answer (e.g. "yes", "no", "continue", "skip")
    */
-  resolveQuestion(id) {
+  resolveQuestion(id, answer) {
     const session = this._sessions.get(id);
     if (!session || !session.pendingQuestion) return false;
 
-    this._resolveQuestionCallback(session);
-    this.emit("question:resolved", { sessionId: id });
+    this._resolveQuestionCallback(session, answer);
+    this.emit("question:resolved", { sessionId: id, answer });
     return true;
   }
 
-  _resolveQuestionCallback(session) {
+  _resolveQuestionCallback(session, answer) {
     const pending = session.pendingQuestion;
     if (!pending) return;
 
     clearTimeout(pending.timeout);
 
+    const response = { status: "ok" };
+    if (answer) {
+      response.answer = answer;
+    }
+
     try {
-      pending.resolve({ status: "ok" });
+      pending.resolve(response);
     } catch (err) {
       // Response may have already been sent
     }
@@ -272,8 +292,15 @@ class SessionTracker extends EventEmitter {
   _cleanupStale() {
     const now = Date.now();
     for (const [id, session] of this._sessions) {
-      if (now - session.lastEventTime > this._staleThresholdMs) {
-        this.removeSession(id);
+      // Never mark sessions stale while a permission or question is pending
+      if (session.pendingPermission || session.pendingQuestion) continue;
+
+      if (
+        session.status !== "stale" &&
+        now - session.lastEventTime > this._staleThresholdMs
+      ) {
+        session.status = "stale";
+        this.emit("session:stale", { sessionId: id });
       }
     }
   }

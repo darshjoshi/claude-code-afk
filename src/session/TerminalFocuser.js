@@ -1,5 +1,6 @@
 const { execFile } = require("child_process");
 const { platform } = require("os");
+const path = require("path");
 
 /**
  * Platform-specific terminal window focusing.
@@ -25,7 +26,13 @@ class TerminalFocuser {
   async focus({ sessionId, projectPath } = {}) {
     const searchTerms = [];
     if (sessionId) searchTerms.push(sessionId);
-    if (projectPath) searchTerms.push(projectPath);
+    if (projectPath) {
+      searchTerms.push(projectPath);
+      // Also try the folder basename (e.g. "claude-code-afk") since
+      // editors like Cursor/VS Code use it in their window title
+      const basename = path.basename(projectPath);
+      if (basename && basename !== projectPath) searchTerms.push(basename);
+    }
     // Also search for "claude" as a fallback
     searchTerms.push("claude");
 
@@ -46,7 +53,7 @@ class TerminalFocuser {
 
     const script = `
       tell application "System Events"
-        set termApps to {"Terminal", "iTerm2", "Alacritty", "kitty", "Warp", "Hyper", "WezTerm"}
+        set termApps to {"Cursor", "Code", "Terminal", "iTerm2", "Alacritty", "kitty", "Warp", "Hyper", "WezTerm"}
         repeat with appName in termApps
           if exists (application process appName) then
             tell application process appName

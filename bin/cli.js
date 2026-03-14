@@ -6,8 +6,8 @@ const HookReceiver = require("../src/hooks/HookReceiver");
 const StreamDeckAdapter = require("../src/streamdeck/StreamDeckAdapter");
 const SessionTracker = require("../src/session/SessionTracker");
 const TerminalFocuser = require("../src/session/TerminalFocuser");
-const { installHooks, uninstallHooks } = require("../src/hooks/installHooks");
-const { listActions, listCategories, LAYOUTS, createCustomAction } = require("../src/streamdeck/actions");
+const { installHooks, uninstallHooks, installStatuslineScript } = require("../src/hooks/installHooks");
+const { listActions, listCategories, LAYOUTS } = require("../src/streamdeck/actions");
 const { listDevices, describeDevice, getDevice } = require("../src/streamdeck/devices");
 const ConfigManager = require("../src/config/ConfigManager");
 
@@ -36,9 +36,6 @@ async function main() {
     case "config":
       handleConfig();
       break;
-    case "send":
-      await sendPrompt(args.join(" "));
-      break;
     case "status":
       await showStatus();
       break;
@@ -54,28 +51,17 @@ async function startServer() {
   // CLI flags override config
   const port = parseInt(getArg("--port", String(config.toJSON().server.port)), 10);
   const deckSize = getArg("--deck", config.toJSON().device.id);
-  const workingDir = getArg("--cwd", config.toJSON().claude.workingDir || process.cwd());
-
-  const controller = new ClaudeCodeController({
-    workingDir,
-    claudeBinary: config.toJSON().claude.binary,
-    model: config.toJSON().claude.model,
-    allowedTools: config.toJSON().claude.allowedTools,
-  });
-  const bridge = new BridgeServer({ port });
-
-  // Resolve layout (config overrides > device defaults)
-  const layout = config.getLayout();
-  const customActions = {};
-  if (config.toJSON().customActions) {
-    for (const [id, def] of Object.entries(config.toJSON().customActions)) {
-      customActions[id] = createCustomAction(id, def);
-    }
-  }
 
   // Multi-session support
   const sessionTracker = new SessionTracker();
   const terminalFocuser = new TerminalFocuser();
+
+  const controller = new ClaudeCodeController({ sessionTracker });
+  const bridge = new BridgeServer({ port });
+
+  // Resolve layout — CLI --deck flag overrides config device
+  const cliDeck = getArg("--deck");
+  const layout = cliDeck ? (LAYOUTS[cliDeck] || config.getLayout()) : config.getLayout();
   const device = getDevice(deckSize) || { keys: 15, cols: 5 };
 
   // Load LED configuration from saved preferences
@@ -84,7 +70,6 @@ async function startServer() {
   const adapter = new StreamDeckAdapter(bridge, controller, {
     deckSize,
     layout,
-    customActions,
     sessionTracker,
     terminalFocuser,
     device,
@@ -120,10 +105,6 @@ async function startServer() {
   });
   sessionTracker.on("question:resolved", ({ sessionId }) => {
     console.log(`[question] Session ${sessionId.slice(-4)} question resolved`);
-  });
-
-  controller.on("status:change", ({ previous, current }) => {
-    console.log(`[claude] ${previous} -> ${current}`);
   });
 
   adapter.on("keyDown", ({ keyIndex, actionId }) => {
@@ -162,7 +143,6 @@ async function startServer() {
 │  WebSocket: ws://127.0.0.1:${String(port).padEnd(23)}│
 │  Device:    ${deviceInfo.name.padEnd(37)}│
 │  Layout:    ${layoutName.substring(0, 37).padEnd(37)}│
-│  CWD:       ${workingDir.substring(0, 37).padEnd(37)}│
 ├─────────────────────────────────────────────────┤
 │  Inputs: ${String(deviceInfo.keys || 0).padStart(2)} keys, ${String(deviceInfo.dials || 0)} dials, ${String(deviceInfo.pedals || 0)} pedals${" ".repeat(11)}│
 │  Multi-session: enabled                        │
@@ -172,10 +152,14 @@ async function startServer() {
 │    POST /hooks/stop                             │
 │    POST /hooks/pre-tool-use                     │
 │    POST /hooks/post-tool-use                    │
+│    POST /hooks/permission-request               │
 │    POST /hooks/session-start                    │
 │    POST /hooks/session-end                      │
+│    POST /hooks/statusline                       │
 │                                                 │
 │  Status: GET /status                            │
+│  Simulator: http://127.0.0.1:${String(port).padEnd(19)}│
+│             /simulator                          │
 └─────────────────────────────────────────────────┘
 `);
 
@@ -197,6 +181,11 @@ function setupHooks() {
   const result = installHooks({ scope, port });
   console.log(`Hooks installed to: ${result.settingsPath}`);
   console.log(`  Events: ${result.events.join(", ")}`);
+
+  console.log(`\nInstalling statusline script...`);
+  const slResult = installStatuslineScript({ port });
+  console.log(`Statusline script: ${slResult.scriptPath}`);
+
   console.log(`\nClaude Code will now send events to http://127.0.0.1:${port}`);
   console.log("Start the bridge server with: streamdeck-claude start");
 }
@@ -345,36 +334,6 @@ function handleConfig() {
       break;
     }
 
-    case "add-action": {
-      const id = args[1];
-      const name = getArg("--name", id);
-      const prompt = getArg("--prompt", "");
-      const label = getArg("--label", id.substring(0, 7).toUpperCase());
-      const color = getArg("--color", "#666666");
-      const icon = getArg("--icon", "message");
-      if (!id) {
-        console.error("Usage: streamdeck-claude config add-action <id> --prompt <text> [--name, --label, --color, --icon]");
-        process.exit(1);
-      }
-      config.addCustomAction(id, { name, prompt, label, color, icon });
-      config.save();
-      console.log(`Custom action added: ${id}`);
-      console.log(`  Assign it to a key: streamdeck-claude config set-key <index> ${id}`);
-      break;
-    }
-
-    case "remove-action": {
-      const id = args[1];
-      if (!id) {
-        console.error("Usage: streamdeck-claude config remove-action <id>");
-        process.exit(1);
-      }
-      config.removeCustomAction(id);
-      config.save();
-      console.log(`Custom action removed: ${id}`);
-      break;
-    }
-
     // ── LED commands ────────────────────────────────────────
     case "set-led": {
       const side = args[1];
@@ -499,8 +458,6 @@ Config commands:
   config set-key <index> <action-id>   Assign action to key
   config set-dial <index> <action-id>  Assign action to dial
   config set-pedal <index> <action-id> Assign action to pedal
-  config add-action <id> [options]     Create custom prompt action
-  config remove-action <id>            Remove custom action
   config reset                         Reset to defaults
 
 LED commands:
@@ -515,26 +472,6 @@ LED commands:
 
 Config file: ~/.streamdeck-claude/config.json
 `);
-  }
-}
-
-async function sendPrompt(prompt) {
-  if (!prompt) {
-    console.error("Usage: streamdeck-claude send <prompt>");
-    process.exit(1);
-  }
-  const config = new ConfigManager(getArg("--config"));
-  config.load();
-  const controller = new ClaudeCodeController({
-    claudeBinary: config.toJSON().claude.binary,
-    model: config.toJSON().claude.model,
-  });
-  try {
-    const result = await controller.send(prompt);
-    console.log(result.result || JSON.stringify(result, null, 2));
-  } catch (err) {
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
   }
 }
 
@@ -554,7 +491,7 @@ async function showStatus() {
 
 function showHelp() {
   console.log(`
-streamdeck-claude — Control Claude Code from your Stream Deck
+streamdeck-claude — Control Claude Code sessions from your Stream Deck
 
 Commands:
   start              Start the bridge server
@@ -563,8 +500,7 @@ Commands:
   devices            List all supported Stream Deck models
   actions            List available button/dial/pedal actions
   layouts            Show default layout for each device
-  config [cmd]       Manage configuration (device, layout, custom actions)
-  send <prompt>      Send a one-shot prompt to Claude
+  config [cmd]       Manage configuration (device, layout, LEDs)
   status             Check bridge server status
 
 Options:
@@ -572,7 +508,6 @@ Options:
   --deck <device>    Device: mini, neo, standard, scissor, plus, xl,
                      plusXl, studio, pedal, virtual (default: standard)
   --scope <scope>    Hook scope: global, project (default: global)
-  --cwd <dir>        Working directory for Claude Code
   --config <path>    Custom config file path
   --type <input>     Filter actions by type: key, dial, pedal, touch
 
@@ -580,11 +515,7 @@ Examples:
   streamdeck-claude setup                              Install hooks
   streamdeck-claude start --deck plus                  Start with SD+
   streamdeck-claude config set-device plusXl            Switch to SD+ XL
-  streamdeck-claude config set-key 5 runTests          Remap key 5
-  streamdeck-claude config add-action lint \\
-    --prompt "Run the linter and fix issues" \\
-    --label LINT --color "#ffaa00"                     Add custom action
-  streamdeck-claude config set-key 14 lint             Assign custom action
+  streamdeck-claude config set-key 5 answerYes         Remap key 5
 `);
 }
 

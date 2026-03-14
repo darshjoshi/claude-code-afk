@@ -1,5 +1,7 @@
 const http = require("http");
 const { EventEmitter } = require("events");
+const fs = require("fs");
+const path = require("path");
 const { WebSocketServer } = require("./WebSocketServer");
 
 /**
@@ -27,8 +29,8 @@ class BridgeServer extends EventEmitter {
   /**
    * Register an HTTP route handler.
    */
-  route(method, path, handler) {
-    this._routes.set(`${method.toUpperCase()} ${path}`, handler);
+  route(method, routePath, handler) {
+    this._routes.set(`${method.toUpperCase()} ${routePath}`, handler);
   }
 
   /**
@@ -128,6 +130,20 @@ class BridgeServer extends EventEmitter {
       this._parseBody(req, (body) => {
         handler(req, res, body);
       });
+      return;
+    }
+
+    // Simulator UI
+    if (req.url === "/simulator" && req.method === "GET") {
+      const simPath = path.resolve(__dirname, "../../simulator/index.html");
+      try {
+        const html = fs.readFileSync(simPath, "utf8");
+        res.writeHead(200, { "Content-Type": "text/html" });
+        res.end(html);
+      } catch {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "simulator not found" }));
+      }
       return;
     }
 

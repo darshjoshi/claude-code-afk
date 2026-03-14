@@ -8,7 +8,7 @@ const InfobarManager = require("./InfobarManager");
 /**
  * Connects the bridge server to Stream Deck action logic.
  * Handles incoming commands from the WebSocket client (Stream Deck plugin),
- * dispatches them to the ClaudeCodeController, and updates button visuals.
+ * dispatches them to session control (via SessionTracker), and updates button visuals.
  *
  * Supports all input types: keys, dials (rotate/press), pedals, and touch.
  * Includes a blinking red alert system for when Claude needs your response.
@@ -25,8 +25,6 @@ class StreamDeckAdapter extends EventEmitter {
     this.layout = options.layout || getLayout(options.deckSize || "standard");
     this._buttonStates = {};
     this._dialValues = {};
-    this._customPrompts = options.customPrompts || {};
-    this._customActions = options.customActions || {};
     this.alertManager = new AlertManager({
       blinkIntervalMs: options.blinkIntervalMs || 500,
     });
@@ -100,10 +98,10 @@ class StreamDeckAdapter extends EventEmitter {
   }
 
   /**
-   * Resolve action by ID, checking custom actions first.
+   * Resolve action by ID.
    */
   _resolveAction(actionId) {
-    return this._customActions[actionId] || getAction(actionId);
+    return getAction(actionId);
   }
 
   /**
@@ -134,9 +132,6 @@ class StreamDeckAdapter extends EventEmitter {
           case "touchTap":
             this._handleTouchTap(msg.position);
             break;
-          case "sendPrompt":
-            await this._handleSendPrompt(msg.prompt, msg.options);
-            break;
           case "abort":
             this._handleAbort();
             break;
@@ -148,9 +143,6 @@ class StreamDeckAdapter extends EventEmitter {
             break;
           case "getLayout":
             this._sendLayout();
-            break;
-          case "setCustomPrompt":
-            this._customPrompts[msg.buttonId] = msg.prompt;
             break;
           case "dismissAlert":
             this._handleDismissAlert(msg.buttonId);
@@ -179,6 +171,9 @@ class StreamDeckAdapter extends EventEmitter {
           case "setStateStyle":
             this.infobarManager.setStateStyle(msg.state, msg.style);
             break;
+          case "refreshButtons":
+            this._refreshAllButtons();
+            break;
           default:
             this.bridge.broadcast("error", {
               error: `Unknown action: ${msg.action}`,
@@ -191,7 +186,7 @@ class StreamDeckAdapter extends EventEmitter {
   }
 
   /**
-   * Update buttons when Claude Code status changes.
+   * Update buttons when controller status changes.
    */
   _bindControllerEvents() {
     this.controller.on("status:change", ({ current }) => {
@@ -201,43 +196,6 @@ class StreamDeckAdapter extends EventEmitter {
       }
       // Update touch point LEDs to reflect system state
       this.infobarManager.onSystemStateChange(current);
-    });
-
-    this.controller.on("prompt:sent", ({ prompt }) => {
-      // User responded — clear any active alert
-      this.alertManager.clearAlert("respondAlert");
-      this._resetRespondButton();
-
-      this._updateButton("status", {
-        label: "RUNNING",
-        color: "#00cc66",
-        icon: "pulse",
-        sublabel: prompt.substring(0, 12) + "...",
-      });
-    });
-
-    this.controller.on("prompt:response", () => {
-      this._updateButton("status", {
-        label: "DONE",
-        color: "#4488ff",
-        icon: "check",
-      });
-      setTimeout(() => {
-        this._updateButton("status", {
-          label: "IDLE",
-          color: "#4488ff",
-          icon: "circle",
-        });
-      }, 3000);
-    });
-
-    this.controller.on("prompt:error", ({ error }) => {
-      this._updateButton("status", {
-        label: "ERROR",
-        color: "#cc0000",
-        icon: "alert",
-        sublabel: error.substring(0, 15),
-      });
     });
   }
 
@@ -250,8 +208,37 @@ class StreamDeckAdapter extends EventEmitter {
       // so that when the alert clears, we can restore the default state
       const svg = this.renderer.render(state);
       this.bridge.updateButton(buttonId, state);
+
+      // Resolve keyIndex for plugin routing
+      let keyIndex;
+      if (this.layoutManager) {
+        const layout = this.layoutManager.getCurrentLayout();
+        for (const [idx, ctx] of Object.entries(layout.keys)) {
+          if (!ctx) continue;
+          // Direct match by actionId
+          if (ctx.actionId === buttonId) {
+            keyIndex = parseInt(idx, 10);
+            break;
+          }
+          // Session alert: buttonId is "session:{id}", layout has actionId "sessionButton"
+          if (buttonId.startsWith("session:") && ctx.actionId === "sessionButton" &&
+              ctx.meta?.session?.sessionId === buttonId.replace("session:", "")) {
+            keyIndex = parseInt(idx, 10);
+            break;
+          }
+        }
+      } else if (this.layout && this.layout.keys) {
+        for (const [idx, aid] of Object.entries(this.layout.keys)) {
+          if (aid === buttonId) {
+            keyIndex = parseInt(idx, 10);
+            break;
+          }
+        }
+      }
+
       this.bridge.broadcast("button:render", {
         buttonId,
+        keyIndex,
         state,
         svg,
       });
@@ -295,6 +282,16 @@ class StreamDeckAdapter extends EventEmitter {
     });
 
     this.sessionTracker.on("session:updated", ({ sessionId, session, event }) => {
+      // Clear stale alert if session is active again,
+      // but NEVER clear if a permission or question is pending
+      if (
+        session.status !== "stale" &&
+        session.status !== "permission" &&
+        !session.pendingPermission &&
+        !session.pendingQuestion
+      ) {
+        this.alertManager.clearAlert(`session:${sessionId}`);
+      }
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
       if (this.layoutManager.currentView === "sessions") {
         this._refreshAllButtons();
@@ -363,6 +360,21 @@ class StreamDeckAdapter extends EventEmitter {
         this.layoutManager.switchView("sessions");
       }
       this._refreshAllButtons();
+    });
+
+    this.sessionTracker.on("session:stale", ({ sessionId }) => {
+      this.alertManager.startAlert(`session:${sessionId}`, {
+        reason: "stale",
+        label: sessionId.slice(-4),
+        sublabel: "Idle",
+        onColor: "#006666",
+        offColor: "#002222",
+        icon: "clock",
+      });
+      this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
+      if (this.layoutManager.currentView === "sessions") {
+        this._refreshAllButtons();
+      }
     });
   }
 
@@ -502,23 +514,7 @@ class StreamDeckAdapter extends EventEmitter {
     const action = this._resolveAction(actionId);
     if (!action) return;
 
-    if (action.onPress === "resetScroll") {
-      this._dialValues[actionId] = 0;
-      this._updateButton(actionId, {
-        ...this._buttonStates[actionId],
-        sublabel: "0",
-      });
-    } else if (action.onPress === "confirmModel") {
-      const options = action.options || [];
-      const idx = (this._dialValues[actionId] || 0) % options.length;
-      const model = options[idx];
-      if (model) {
-        this.controller.model = model;
-        this.bridge.broadcast("model:changed", { model });
-      }
-    } else if (action.onPress === "resetMaxTurns") {
-      this._dialValues[actionId] = action.min || 1;
-    } else if (action.onPress === "toggleMute") {
+    if (action.onPress === "toggleMute") {
       const muted = !this._buttonStates[actionId]?.muted;
       this._updateButton(actionId, {
         ...this._buttonStates[actionId],
@@ -558,24 +554,8 @@ class StreamDeckAdapter extends EventEmitter {
 
   async _executeAction(action, actionId, context) {
     switch (action.handler) {
-      case "sendPrompt": {
-        const prompt =
-          this._customPrompts[actionId] || action.payload?.prompt;
-
-        if (!prompt) {
-          this.bridge.broadcast("error", {
-            error: "No prompt configured for this button",
-          });
-          return;
-        }
-
-        await this.controller.send(prompt, {
-          allowedTools: action.payload?.allowedTools,
-        });
-        break;
-      }
       case "abort":
-        this._handleAbort();
+        this._handleAbort(context);
         break;
       case "resetSession":
         this._handleResetSession();
@@ -608,6 +588,9 @@ class StreamDeckAdapter extends EventEmitter {
         break;
       case "focusTerminal":
         this._handleFocusTerminal(context);
+        break;
+      case "answerQuestion":
+        this._handleAnswerQuestion(context);
         break;
       case "prevPage":
         if (this.layoutManager) {
@@ -668,6 +651,20 @@ class StreamDeckAdapter extends EventEmitter {
     this._refreshAllButtons();
   }
 
+  _handleAnswerQuestion(context) {
+    if (!this.sessionTracker || !this.layoutManager) return;
+
+    const sessionId = this.layoutManager.focusedSessionId;
+    if (!sessionId) return;
+
+    const answer = context?.meta?.answer;
+    this.sessionTracker.resolveQuestion(sessionId, answer);
+
+    // Navigate back to sessions
+    this.layoutManager.switchView("sessions");
+    this._refreshAllButtons();
+  }
+
   _handleNavigateBack() {
     if (!this.layoutManager) return;
 
@@ -692,7 +689,8 @@ class StreamDeckAdapter extends EventEmitter {
     const sessionId = context?.sessionId || this.layoutManager?.focusedSessionId;
     if (!sessionId) return;
 
-    await this.terminalFocuser.focus({ sessionId });
+    const session = this.sessionTracker?.getSession(sessionId);
+    await this.terminalFocuser.focus({ sessionId, projectPath: session?.cwd });
   }
 
   // ── Refresh all buttons for current view ───────────────────
@@ -791,6 +789,7 @@ class StreamDeckAdapter extends EventEmitter {
       waiting: "#ffcc00",
       attention: "#ffcc00",
       permission: "#ff6600",
+      stale: "#006666",
       offline: "#333333",
     };
     return {
@@ -811,16 +810,15 @@ class StreamDeckAdapter extends EventEmitter {
     this.emit("alert:dismissed", { buttonId: id });
   }
 
-  async _handleSendPrompt(prompt, options = {}) {
-    return this.controller.send(prompt, options);
-  }
-
-  _handleAbort() {
+  _handleAbort(context) {
     // Aborting counts as responding — clear alert
     this.alertManager.clearAlert("respondAlert");
     this._resetRespondButton();
 
-    const aborted = this.controller.abort();
+    // Deny pending permission on focused session
+    const sessionId = context?.sessionId || this.layoutManager?.focusedSessionId;
+    const aborted = this.controller.abort(sessionId);
+
     if (aborted) {
       this._updateButton("status", {
         label: "ABORTED",
@@ -842,9 +840,16 @@ class StreamDeckAdapter extends EventEmitter {
     this.alertManager.clearAlert("respondAlert");
     this._resetRespondButton();
 
-    this.controller.resetSession();
+    // Clear all session approvals if tracker exists
+    if (this.sessionTracker) {
+      const sessions = this.sessionTracker.getAllSessions();
+      for (const session of sessions) {
+        session.sessionApprovals.clear();
+      }
+    }
+
     this._updateButton("status", {
-      label: "NEW",
+      label: "RESET",
       color: "#ffffff",
       icon: "plus",
     });
@@ -861,15 +866,6 @@ class StreamDeckAdapter extends EventEmitter {
     const status = this.controller.getStatus();
     status.alerting = this.alertManager.hasActiveAlerts;
     status.activeAlerts = this.alertManager.activeAlerts;
-    if (this.sessionTracker) {
-      status.sessions = this.sessionTracker.getAllSessions().map((s) => ({
-        sessionId: s.sessionId,
-        status: s.status,
-        label: s.label,
-        hasPendingPermission: !!s.pendingPermission,
-        hasPendingQuestion: !!s.pendingQuestion,
-      }));
-    }
     if (this.layoutManager) {
       status.currentView = this.layoutManager.currentView;
     }
@@ -894,8 +890,36 @@ class StreamDeckAdapter extends EventEmitter {
     this._buttonStates[actionId] = state;
     const svg = this.renderer.render(state);
     this.bridge.updateButton(actionId, state);
+
+    // Resolve keyIndex from current layout so the plugin can route by position
+    let keyIndex;
+    if (this.layoutManager) {
+      const layout = this.layoutManager.getCurrentLayout();
+      for (const [idx, ctx] of Object.entries(layout.keys)) {
+        if (!ctx) continue;
+        if (ctx.actionId === actionId) {
+          keyIndex = parseInt(idx, 10);
+          break;
+        }
+        // Session update: actionId is "session:{id}", layout has "sessionButton"
+        if (actionId.startsWith("session:") && ctx.actionId === "sessionButton" &&
+            ctx.meta?.session?.sessionId === actionId.replace("session:", "")) {
+          keyIndex = parseInt(idx, 10);
+          break;
+        }
+      }
+    } else if (this.layout && this.layout.keys) {
+      for (const [idx, aid] of Object.entries(this.layout.keys)) {
+        if (aid === actionId) {
+          keyIndex = parseInt(idx, 10);
+          break;
+        }
+      }
+    }
+
     this.bridge.broadcast("button:render", {
       buttonId: actionId,
+      keyIndex,
       state,
       svg,
     });

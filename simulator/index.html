@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stream Deck Simulator - Claude Code AFK</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d0d0d;
+    color: #ccc;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 24px;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .header h1 { font-size: 18px; font-weight: 600; color: #eee; }
+  .header select {
+    background: #222;
+    color: #ccc;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .connection-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: #cc0000;
+    transition: background 0.3s;
+  }
+  .connection-dot.connected { background: #00cc66; }
+
+  /* Chassis */
+  .chassis {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 24px;
+    padding: 28px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+
+  /* Key grid */
+  .key-grid {
+    display: grid;
+    gap: 8px;
+  }
+  .key-slot {
+    width: 100px; height: 100px;
+    border-radius: 10px;
+    background: #111;
+    border: 2px solid #2a2a2a;
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.08s, filter 0.08s;
+    position: relative;
+  }
+  .key-slot:hover { border-color: #555; }
+  .key-slot:active, .key-slot.pressed {
+    transform: scale(0.93);
+    filter: brightness(0.8);
+  }
+  .key-slot svg { width: 100%; height: 100%; display: block; }
+  .key-slot.empty { cursor: default; opacity: 0.3; }
+  .key-slot.empty:hover { border-color: #2a2a2a; }
+  .key-slot.empty:active { transform: none; filter: none; }
+
+  /* Infobar (Neo) */
+  .infobar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .touch-point {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    background: #222;
+    border: 2px solid #333;
+    cursor: pointer;
+    transition: background 0.2s, box-shadow 0.2s;
+    flex-shrink: 0;
+  }
+  .touch-point:hover { border-color: #666; }
+  .touch-point:active { transform: scale(0.9); }
+  .gauge-container {
+    flex: 1;
+    background: #111;
+    border-radius: 8px;
+    padding: 8px 14px;
+    border: 1px solid #333;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .gauge-bar-track {
+    height: 8px;
+    background: #222;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .gauge-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    background: #00cc66;
+    transition: width 0.3s, background 0.3s;
+    width: 0%;
+  }
+  .gauge-text {
+    font-size: 11px;
+    color: #999;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* Dials */
+  .dial-row {
+    display: flex;
+    gap: 24px;
+    justify-content: center;
+  }
+  .dial {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #2a2a2a, #1a1a1a);
+    border: 2px solid #444;
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: #888;
+    transition: border-color 0.2s;
+    position: relative;
+  }
+  .dial::after {
+    content: '';
+    position: absolute;
+    top: 6px; left: 50%;
+    width: 3px; height: 10px;
+    background: #666;
+    border-radius: 2px;
+    transform: translateX(-50%);
+  }
+  .dial:hover { border-color: #888; }
+  .dial:active { cursor: grabbing; border-color: #aaa; }
+
+  /* Touch strip */
+  .touch-strip {
+    width: 100%;
+    height: 24px;
+    background: #111;
+    border-radius: 12px;
+    border: 1px solid #333;
+    overflow: hidden;
+    position: relative;
+  }
+  .touch-strip-fill {
+    height: 100%;
+    background: #4488ff;
+    border-radius: 12px;
+    transition: width 0.3s;
+  }
+
+  /* Status bar */
+  .status-bar {
+    margin-top: 16px;
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+  }
+
+  /* Log panel */
+  .log-panel {
+    margin-top: 16px;
+    width: 100%;
+    max-width: 600px;
+    max-height: 120px;
+    overflow-y: auto;
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 8px;
+    padding: 8px;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 11px;
+    color: #666;
+  }
+  .log-panel div { padding: 1px 0; }
+  .log-panel .log-send { color: #4488ff; }
+  .log-panel .log-recv { color: #00cc66; }
+  .log-panel .log-err { color: #cc0000; }
+
+  /* Hook simulation panel */
+  .hook-panel {
+    margin-top: 24px;
+    width: 100%;
+    max-width: 600px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .hook-panel h2 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #eee;
+    margin-bottom: 12px;
+  }
+  .hook-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .hook-btn {
+    padding: 8px 14px;
+    border: 1px solid #444;
+    border-radius: 6px;
+    background: #222;
+    color: #ccc;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .hook-btn:hover { background: #333; border-color: #666; }
+  .hook-btn:active { background: #444; }
+  .hook-btn.green { border-color: #00cc66; color: #00cc66; }
+  .hook-btn.green:hover { background: #0a2a1a; }
+  .hook-btn.orange { border-color: #ff6600; color: #ff6600; }
+  .hook-btn.orange:hover { background: #2a1500; }
+  .hook-btn.yellow { border-color: #ffcc00; color: #ffcc00; }
+  .hook-btn.yellow:hover { background: #2a2200; }
+  .hook-btn.red { border-color: #cc0000; color: #cc0000; }
+  .hook-btn.red:hover { background: #2a0a0a; }
+  .hook-select {
+    background: #222;
+    color: #ccc;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+  .hook-input {
+    background: #222;
+    color: #ccc;
+    border: 1px solid #444;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 12px;
+    width: 140px;
+  }
+  .hook-label {
+    font-size: 11px;
+    color: #888;
+    min-width: 80px;
+  }
+  .hook-status {
+    font-size: 11px;
+    color: #666;
+    margin-top: 8px;
+    font-family: 'SF Mono', 'Consolas', monospace;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="connection-dot" id="connDot"></div>
+  <h1>Stream Deck Simulator</h1>
+  <select id="deviceSelect"></select>
+</div>
+
+<div class="chassis" id="chassis">
+  <div class="key-grid" id="keyGrid"></div>
+</div>
+
+<div class="status-bar" id="statusBar">Disconnected</div>
+<div class="log-panel" id="logPanel"></div>
+
+<!-- Hook Simulation Panel -->
+<div class="hook-panel" id="hookPanel">
+  <h2>Hook Simulation</h2>
+
+  <div class="hook-row">
+    <span class="hook-label">Session:</span>
+    <input class="hook-input" id="hookSessionId" placeholder="session ID (auto)" />
+    <button class="hook-btn" id="hookRandomSession">Random ID</button>
+  </div>
+
+  <div class="hook-row">
+    <button class="hook-btn green" id="hookSessionStart">Session Start</button>
+    <button class="hook-btn red" id="hookSessionEnd">Session End</button>
+  </div>
+
+  <div class="hook-row">
+    <span class="hook-label">Tool:</span>
+    <select class="hook-select" id="hookToolSelect">
+      <option value="Bash">Bash</option>
+      <option value="Read">Read</option>
+      <option value="Write">Write</option>
+      <option value="Edit">Edit</option>
+      <option value="Glob">Glob</option>
+      <option value="Grep">Grep</option>
+      <option value="Agent">Agent</option>
+      <option value="WebFetch">WebFetch</option>
+    </select>
+    <button class="hook-btn orange" id="hookPreTool">Pre-Tool-Use</button>
+    <button class="hook-btn" id="hookPostTool">Post-Tool-Use</button>
+  </div>
+
+  <div class="hook-row">
+    <span class="hook-label">Question:</span>
+    <input class="hook-input" id="hookQuestionMsg" placeholder="Do you want to continue?" value="Do you want to continue?" />
+    <button class="hook-btn yellow" id="hookStop">Stop (Question)</button>
+  </div>
+
+  <div class="hook-status" id="hookStatus">Ready to simulate hooks</div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// Device definitions (from devices.js)
+// ═══════════════════════════════════════════════════════════════
+var DEVICES = {
+  mini:     { id: "mini",     name: "Stream Deck Mini",       keys: 6,  rows: 2, cols: 3, dials: 0, touchStrips: 0, touchPoints: 0 },
+  neo:      { id: "neo",      name: "Stream Deck Neo",        keys: 8,  rows: 2, cols: 4, dials: 0, touchStrips: 0, touchPoints: 2, hasInfobar: true },
+  standard: { id: "standard", name: "Stream Deck MK.2",       keys: 15, rows: 3, cols: 5, dials: 0, touchStrips: 0, touchPoints: 0 },
+  plus:     { id: "plus",     name: "Stream Deck +",          keys: 8,  rows: 2, cols: 4, dials: 4, touchStrips: 1, touchPoints: 0 },
+  xl:       { id: "xl",       name: "Stream Deck XL",         keys: 32, rows: 4, cols: 8, dials: 0, touchStrips: 0, touchPoints: 0 },
+  plusXl:   { id: "plusXl",    name: "Stream Deck + XL",       keys: 36, rows: 4, cols: 9, dials: 6, touchStrips: 1, touchPoints: 0 },
+  studio:   { id: "studio",   name: "Stream Deck Studio",     keys: 32, rows: 4, cols: 8, dials: 2, touchStrips: 0, touchPoints: 0 },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Action defaults (from actions.js - just defaultState per action)
+// ═══════════════════════════════════════════════════════════════
+var ACTION_DEFAULTS = {
+  status:           { label: "IDLE",     color: "#4488ff", icon: "circle" },
+  toolIndicator:    { label: "\u2014",       color: "#444444", icon: "wrench" },
+  respondAlert:     { label: "\u2014",       color: "#1a1a1a", icon: "circle" },
+  abort:            { label: "ABORT",    color: "#cc0000", icon: "stop" },
+  newSession:       { label: "NEW",      color: "#ffffff", icon: "plus" },
+  sessionButton:    { label: "SESS",     color: "#444444", icon: "circle" },
+  allowTool:        { label: "ALLOW",    color: "#00cc66", icon: "check" },
+  allowToolSession: { label: "ALLOW SESS", color: "#4488ff", icon: "check" },
+  denyTool:         { label: "DENY",     color: "#cc0000", icon: "stop" },
+  focusTerminal:    { label: "FOCUS",    color: "#ffcc00", icon: "eye" },
+  backButton:       { label: "BACK",     color: "#666666", icon: "circle" },
+  sessionsView:     { label: "SESSIONS", color: "#4488ff", icon: "message" },
+  permissionInfo:   { label: "INFO",     color: "#ff6600", icon: "shield" },
+  prevPage:         { label: "PREV",     color: "#666666", icon: "circle" },
+  nextPage:         { label: "NEXT",     color: "#666666", icon: "circle" },
+  answerYes:        { label: "YES",      color: "#00cc66", icon: "check" },
+  answerNo:         { label: "NO",       color: "#cc0000", icon: "stop" },
+  answerContinue:   { label: "CONTINUE", color: "#4488ff", icon: "circle" },
+  answerSkip:       { label: "SKIP",     color: "#888888", icon: "circle" },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Layouts (from actions.js)
+// ═══════════════════════════════════════════════════════════════
+var LAYOUTS = {
+  mini: {
+    keys: { 0:"status", 1:"respondAlert", 2:"sessionsView", 3:"abort", 4:"focusTerminal", 5:"backButton" },
+  },
+  neo: {
+    keys: { 0:"status", 1:"respondAlert", 2:"toolIndicator", 3:"sessionsView", 4:"abort", 5:"focusTerminal", 6:"backButton" },
+    touchPoints: { 0:"prevPage", 1:"nextPage" },
+    infobar: "contextGauge",
+  },
+  standard: {
+    keys: { 0:"status", 1:"respondAlert", 2:"toolIndicator", 3:"sessionsView", 4:"focusTerminal",
+            10:"abort", 11:"backButton", 13:"prevPage", 14:"nextPage" },
+  },
+  plus: {
+    keys: { 0:"status", 1:"respondAlert", 2:"toolIndicator", 3:"sessionsView", 4:"abort", 5:"focusTerminal", 6:"backButton" },
+    dials: { 0:"volume" },
+  },
+  xl: {
+    keys: { 0:"status", 1:"respondAlert", 2:"toolIndicator", 3:"sessionsView", 4:"focusTerminal",
+            24:"abort", 25:"backButton", 30:"prevPage", 31:"nextPage" },
+  },
+  plusXl: {
+    keys: { 0:"status", 1:"respondAlert", 2:"toolIndicator", 3:"sessionsView", 4:"focusTerminal",
+            27:"abort", 28:"backButton", 34:"prevPage", 35:"nextPage" },
+    dials: { 0:"volume" },
+  },
+  studio: {
+    keys: { 0:"status", 1:"respondAlert", 2:"toolIndicator", 3:"sessionsView", 4:"focusTerminal",
+            24:"abort", 25:"backButton", 30:"prevPage", 31:"nextPage" },
+    dials: { 0:"volume" },
+  },
+};
+
+// Dial labels
+var DIAL_LABELS = { volume:"VOL" };
+
+// ═══════════════════════════════════════════════════════════════
+// ButtonRenderer (browser port of ButtonRenderer.js)
+// ═══════════════════════════════════════════════════════════════
+var ButtonRenderer = {
+  render: function(state) {
+    var label = state.label || "";
+    var color = state.color || "#333333";
+    var icon = state.icon || null;
+    var sublabel = state.sublabel || "";
+    var textColor = this._contrastColor(color);
+    var iconSvg = icon ? this._renderIcon(icon, textColor) : "";
+    var lines = String(label).split("\\n");
+    var labelY = icon ? 105 : sublabel ? 65 : 80;
+    var totalLen = lines.join("").length;
+    var fontSize = totalLen > 6 ? 16 : totalLen > 4 ? 18 : 22;
+
+    var labelSvg;
+    if (lines.length > 1) {
+      labelSvg = lines.map(function(line, i) {
+        var y = labelY + (i - (lines.length - 1) / 2) * 18;
+        return '<text x="72" y="' + y + '" text-anchor="middle" font-family="Arial,sans-serif" font-size="' + fontSize + '" font-weight="bold" fill="' + textColor + '">' + ButtonRenderer._esc(line) + '</text>';
+      }).join("");
+    } else {
+      labelSvg = '<text x="72" y="' + labelY + '" text-anchor="middle" font-family="Arial,sans-serif" font-size="' + fontSize + '" font-weight="bold" fill="' + textColor + '">' + this._esc(label) + '</text>';
+    }
+
+    var sublabelSvg = sublabel
+      ? '<text x="72" y="' + (labelY + 20) + '" text-anchor="middle" font-family="Arial,sans-serif" font-size="12" fill="' + textColor + '" opacity="0.7">' + this._esc(sublabel) + '</text>'
+      : "";
+
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">'
+      + '<rect width="144" height="144" rx="12" fill="' + color + '"/>'
+      + iconSvg + labelSvg + sublabelSvg + '</svg>';
+  },
+
+  _renderIcon: function(icon, color) {
+    var cx = 72;
+    var icons = {
+      circle: '<circle cx="'+cx+'" cy="45" r="16" fill="none" stroke="'+color+'" stroke-width="3"/>',
+      pulse: '<circle cx="'+cx+'" cy="45" r="16" fill="none" stroke="'+color+'" stroke-width="3"><animate attributeName="r" values="12;18;12" dur="1.5s" repeatCount="indefinite"/><animate attributeName="opacity" values="1;0.5;1" dur="1.5s" repeatCount="indefinite"/></circle>',
+      stop: '<rect x="'+(cx-14)+'" y="31" width="28" height="28" rx="4" fill="'+color+'"/>',
+      plus: '<line x1="'+cx+'" y1="31" x2="'+cx+'" y2="59" stroke="'+color+'" stroke-width="3" stroke-linecap="round"/><line x1="'+(cx-14)+'" y1="45" x2="'+(cx+14)+'" y2="45" stroke="'+color+'" stroke-width="3" stroke-linecap="round"/>',
+      eye: '<ellipse cx="'+cx+'" cy="45" rx="18" ry="12" fill="none" stroke="'+color+'" stroke-width="2.5"/><circle cx="'+cx+'" cy="45" r="6" fill="'+color+'"/>',
+      bug: '<ellipse cx="'+cx+'" cy="48" rx="12" ry="14" fill="none" stroke="'+color+'" stroke-width="2.5"/><circle cx="'+cx+'" cy="36" r="8" fill="none" stroke="'+color+'" stroke-width="2.5"/>',
+      check: '<polyline points="'+(cx-12)+',45 '+(cx-3)+',54 '+(cx+14)+',34" fill="none" stroke="'+color+'" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>',
+      wrench: '<line x1="'+(cx-10)+'" y1="55" x2="'+(cx+10)+'" y2="35" stroke="'+color+'" stroke-width="3" stroke-linecap="round"/><circle cx="'+(cx+12)+'" cy="33" r="8" fill="none" stroke="'+color+'" stroke-width="2.5"/>',
+      book: '<rect x="'+(cx-16)+'" y="29" width="32" height="32" rx="3" fill="none" stroke="'+color+'" stroke-width="2.5"/><line x1="'+cx+'" y1="29" x2="'+cx+'" y2="61" stroke="'+color+'" stroke-width="2"/>',
+      git: '<circle cx="'+cx+'" cy="37" r="6" fill="none" stroke="'+color+'" stroke-width="2.5"/><circle cx="'+cx+'" cy="55" r="6" fill="none" stroke="'+color+'" stroke-width="2.5"/><line x1="'+cx+'" y1="43" x2="'+cx+'" y2="49" stroke="'+color+'" stroke-width="2.5"/>',
+      shield: '<path d="M'+cx+',28 L'+(cx+18)+',36 L'+(cx+18)+',50 Q'+(cx+18)+',62 '+cx+',64 Q'+(cx-18)+',62 '+(cx-18)+',50 L'+(cx-18)+',36 Z" fill="none" stroke="'+color+'" stroke-width="2.5"/>',
+      clock: '<circle cx="'+cx+'" cy="45" r="16" fill="none" stroke="'+color+'" stroke-width="2.5"/><line x1="'+cx+'" y1="45" x2="'+cx+'" y2="35" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round"/><line x1="'+cx+'" y1="45" x2="'+(cx+8)+'" y2="49" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round"/>',
+      alert: '<path d="M'+cx+',30 L'+(cx+18)+',60 L'+(cx-18)+',60 Z" fill="none" stroke="'+color+'" stroke-width="2.5" stroke-linejoin="round"/><line x1="'+cx+'" y1="42" x2="'+cx+'" y2="50" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round"/><circle cx="'+cx+'" cy="55" r="2" fill="'+color+'"/>',
+      compress: '<polyline points="'+(cx-10)+',32 '+cx+',40 '+(cx+10)+',32" fill="none" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><polyline points="'+(cx-10)+',58 '+cx+',50 '+(cx+10)+',58" fill="none" stroke="'+color+'" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>',
+      message: '<rect x="'+(cx-18)+'" y="30" width="36" height="24" rx="4" fill="none" stroke="'+color+'" stroke-width="2.5"/><polyline points="'+(cx-6)+',54 '+(cx-12)+',62 '+(cx-6)+',54 '+(cx+6)+',54" fill="none" stroke="'+color+'" stroke-width="2.5"/>',
+      diff: '<line x1="'+(cx-12)+'" y1="38" x2="'+(cx+12)+'" y2="38" stroke="#cc0000" stroke-width="2.5" stroke-linecap="round"/><line x1="'+(cx-12)+'" y1="52" x2="'+(cx+12)+'" y2="52" stroke="#00cc66" stroke-width="2.5" stroke-linecap="round"/><line x1="'+cx+'" y1="45" x2="'+cx+'" y2="59" stroke="#00cc66" stroke-width="2" stroke-linecap="round"/>',
+    };
+    return icons[icon] || "";
+  },
+
+  _contrastColor: function(hex) {
+    var m = String(hex).match(/^#([0-9a-f]{6})$/i);
+    if (!m) return "#ffffff";
+    var r = parseInt(m[1].substring(0,2),16);
+    var g = parseInt(m[1].substring(2,4),16);
+    var b = parseInt(m[1].substring(4,6),16);
+    return (0.299*r + 0.587*g + 0.114*b) / 255 > 0.5 ? "#000000" : "#ffffff";
+  },
+
+  _esc: function(s) {
+    return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Safe DOM helpers
+// ═══════════════════════════════════════════════════════════════
+function setSvgContent(el, svgString) {
+  var doc = new DOMParser().parseFromString(svgString, "image/svg+xml");
+  var svg = doc.documentElement;
+  while (el.firstChild) el.removeChild(el.firstChild);
+  el.appendChild(document.importNode(svg, true));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Simulator App
+// ═══════════════════════════════════════════════════════════════
+var App = {
+  ws: null,
+  _reconnectTimer: null,
+  currentDevice: "standard",
+  buttonStates: {},
+  gaugeState: { percent: 0, color: "#00cc66", formatted: "0", maxFormatted: "200k" },
+  touchPointLeds: { left: { color: "#4488ff", brightness: 30 }, right: { color: "#4488ff", brightness: 30 } },
+
+  init: function() {
+    this._populateDeviceSelect();
+    this._buildUI();
+    this._connect();
+    this._bindHookPanel();
+
+    var self = this;
+    document.getElementById("deviceSelect").addEventListener("change", function(e) {
+      self.currentDevice = e.target.value;
+      self._buildUI();
+      self._renderAllButtons();
+    });
+  },
+
+  // ── WebSocket ──────────────────────────────────────────────
+  _connect: function() {
+    if (this.ws && (this.ws.readyState === WebSocket.CONNECTING || this.ws.readyState === WebSocket.OPEN)) {
+      return;
+    }
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+
+    var self = this;
+    var wsUrl = "ws://" + (location.hostname || "127.0.0.1") + ":" + (location.port || "8247");
+    this.ws = new WebSocket(wsUrl);
+
+    this.ws.onopen = function() {
+      document.getElementById("connDot").classList.add("connected");
+      self._setStatus("Connected");
+      self._log("recv", "Connected to bridge server");
+    };
+
+    this.ws.onclose = function() {
+      document.getElementById("connDot").classList.remove("connected");
+      self._setStatus("Disconnected - reconnecting...");
+      self._log("err", "Disconnected, retrying in 2s");
+      self._reconnectTimer = setTimeout(function() {
+        self._reconnectTimer = null;
+        self._connect();
+      }, 2000);
+    };
+
+    this.ws.onerror = function() {};
+
+    this.ws.onmessage = function(evt) {
+      try {
+        var msg = JSON.parse(evt.data);
+        self._handleMessage(msg);
+      } catch (e) {
+        self._log("err", "Bad message: " + e.message);
+      }
+    };
+  },
+
+  _handleMessage: function(msg) {
+    switch (msg.type) {
+      case "state:sync":
+        this._log("recv", "state:sync - full state received");
+        if (msg.state && msg.state.buttons) {
+          var btns = msg.state.buttons;
+          for (var k in btns) {
+            if (btns.hasOwnProperty(k)) {
+              this.buttonStates[k] = Object.assign({}, this.buttonStates[k], btns[k]);
+            }
+          }
+        }
+        if (msg.state) {
+          this._setStatus("Claude: " + (msg.state.claudeStatus || "unknown"));
+        }
+        this._renderAllButtons();
+        break;
+
+      case "button:update":
+        this._log("recv", "button:update " + msg.buttonId);
+        if (msg.buttonId && msg.state) {
+          this.buttonStates[msg.buttonId] = Object.assign({}, this.buttonStates[msg.buttonId], msg.state);
+          this._renderButton(msg.buttonId);
+        }
+        break;
+
+      case "state:update":
+        if (msg.patch) {
+          this._log("recv", "state:update " + JSON.stringify(msg.patch).substring(0, 80));
+          if (msg.patch.claudeStatus) {
+            this._setStatus("Claude: " + msg.patch.claudeStatus);
+          }
+          if (msg.patch.buttons) {
+            for (var id in msg.patch.buttons) {
+              if (msg.patch.buttons.hasOwnProperty(id)) {
+                this.buttonStates[id] = Object.assign({}, this.buttonStates[id], msg.patch.buttons[id]);
+              }
+            }
+            this._renderAllButtons();
+          }
+        }
+        break;
+
+      case "infobar:update":
+        this._log("recv", "infobar:update " + msg.percent + "%");
+        this.gaugeState = {
+          percent: msg.percent || 0,
+          color: msg.color || "#00cc66",
+          formatted: msg.formatted || "0",
+          maxFormatted: msg.maxFormatted || "200k",
+        };
+        this._updateGauge();
+        break;
+
+      case "touchpoint:led":
+        this._log("recv", "touchpoint:led");
+        if (msg.left) this.touchPointLeds.left = msg.left;
+        if (msg.right) this.touchPointLeds.right = msg.right;
+        this._updateTouchPoints();
+        break;
+
+      case "button:render":
+        if (msg.state) {
+          // If keyIndex is present, render directly to that key slot (dynamic views)
+          if (msg.keyIndex !== undefined && msg.keyIndex >= 0) {
+            this._renderButtonAtIndex(msg.keyIndex, msg.state);
+          }
+          // Also update by actionId for static buttons
+          if (msg.buttonId) {
+            this.buttonStates[msg.buttonId] = Object.assign({}, this.buttonStates[msg.buttonId], msg.state);
+            this._renderButton(msg.buttonId);
+          }
+        }
+        break;
+
+      case "view:changed":
+        this._log("recv", "view:changed -> " + msg.view);
+        break;
+
+      case "ack":
+        break;
+
+      default:
+        this._log("recv", msg.type);
+    }
+  },
+
+  _send: function(data) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data));
+      this._log("send", data.action + " " + JSON.stringify(data).substring(0, 60));
+    }
+  },
+
+  // ── UI Building ────────────────────────────────────────────
+  _populateDeviceSelect: function() {
+    var sel = document.getElementById("deviceSelect");
+    for (var id in DEVICES) {
+      if (!DEVICES.hasOwnProperty(id)) continue;
+      var opt = document.createElement("option");
+      opt.value = id;
+      opt.textContent = DEVICES[id].name;
+      if (id === "standard") opt.selected = true;
+      sel.appendChild(opt);
+    }
+  },
+
+  _buildUI: function() {
+    var device = DEVICES[this.currentDevice];
+    var layout = LAYOUTS[this.currentDevice];
+    if (!device || !layout) return;
+
+    var chassis = document.getElementById("chassis");
+    while (chassis.firstChild) chassis.removeChild(chassis.firstChild);
+
+    var self = this;
+
+    // Key grid
+    if (device.keys > 0) {
+      var grid = document.createElement("div");
+      grid.className = "key-grid";
+      grid.id = "keyGrid";
+      grid.style.gridTemplateColumns = "repeat(" + device.cols + ", 100px)";
+
+      for (var i = 0; i < device.keys; i++) {
+        var slot = document.createElement("div");
+        slot.className = "key-slot";
+        slot.dataset.keyIndex = i;
+
+        var actionId = layout.keys[i];
+        if (!actionId) {
+          slot.classList.add("empty");
+        } else {
+          slot.dataset.actionId = actionId;
+          (function(idx, el) {
+            el.addEventListener("mousedown", function() {
+              el.classList.add("pressed");
+              self._send({ action: "keyDown", keyIndex: idx });
+            });
+            el.addEventListener("mouseup", function() { el.classList.remove("pressed"); });
+            el.addEventListener("mouseleave", function() { el.classList.remove("pressed"); });
+          })(i, slot);
+        }
+        grid.appendChild(slot);
+      }
+      chassis.appendChild(grid);
+    }
+
+    // Infobar (Neo)
+    if (device.hasInfobar) {
+      var bar = document.createElement("div");
+      bar.className = "infobar";
+      bar.id = "infobar";
+
+      var leftTp = document.createElement("div");
+      leftTp.className = "touch-point";
+      leftTp.id = "touchPointLeft";
+      leftTp.addEventListener("click", function() {
+        self._send({ action: "keyDown", keyIndex: -1, touchPoint: 0 });
+      });
+
+      var gauge = document.createElement("div");
+      gauge.className = "gauge-container";
+
+      var track = document.createElement("div");
+      track.className = "gauge-bar-track";
+      var fill = document.createElement("div");
+      fill.className = "gauge-bar-fill";
+      fill.id = "gaugeFill";
+      track.appendChild(fill);
+
+      var textRow = document.createElement("div");
+      textRow.className = "gauge-text";
+      var gLabel = document.createElement("span");
+      gLabel.id = "gaugeLabel";
+      gLabel.textContent = "0%";
+      var gTokens = document.createElement("span");
+      gTokens.id = "gaugeTokens";
+      gTokens.textContent = "0 / 200k";
+      textRow.appendChild(gLabel);
+      textRow.appendChild(gTokens);
+
+      gauge.appendChild(track);
+      gauge.appendChild(textRow);
+
+      var rightTp = document.createElement("div");
+      rightTp.className = "touch-point";
+      rightTp.id = "touchPointRight";
+      rightTp.addEventListener("click", function() {
+        self._send({ action: "keyDown", keyIndex: -1, touchPoint: 1 });
+      });
+
+      bar.appendChild(leftTp);
+      bar.appendChild(gauge);
+      bar.appendChild(rightTp);
+      chassis.appendChild(bar);
+
+      this._updateGauge();
+      this._updateTouchPoints();
+    }
+
+    // Touch strip (Plus models)
+    if (device.touchStrips > 0) {
+      var strip = document.createElement("div");
+      strip.className = "touch-strip";
+      strip.id = "touchStrip";
+      var stripFill = document.createElement("div");
+      stripFill.className = "touch-strip-fill";
+      stripFill.id = "touchStripFill";
+      stripFill.style.width = "0%";
+      strip.appendChild(stripFill);
+      chassis.appendChild(strip);
+    }
+
+    // Dials
+    if (device.dials > 0) {
+      var dialRow = document.createElement("div");
+      dialRow.className = "dial-row";
+
+      for (var d = 0; d < device.dials; d++) {
+        var dial = document.createElement("div");
+        dial.className = "dial";
+        dial.dataset.dialIndex = d;
+
+        var dialActionId = layout.dials ? layout.dials[d] : null;
+        dial.textContent = dialActionId ? (DIAL_LABELS[dialActionId] || "") : "";
+
+        (function(idx, el) {
+          el.addEventListener("wheel", function(e) {
+            e.preventDefault();
+            var ticks = e.deltaY > 0 ? 1 : -1;
+            self._send({ action: "dialRotate", dialIndex: idx, ticks: ticks });
+          }, { passive: false });
+          el.addEventListener("click", function() {
+            self._send({ action: "dialPress", dialIndex: idx });
+          });
+        })(d, dial);
+
+        dialRow.appendChild(dial);
+      }
+      chassis.appendChild(dialRow);
+    }
+  },
+
+  // ── Rendering ──────────────────────────────────────────────
+  _renderAllButtons: function() {
+    var layout = LAYOUTS[this.currentDevice];
+    if (!layout) return;
+    for (var keyIdx in layout.keys) {
+      if (!layout.keys.hasOwnProperty(keyIdx)) continue;
+      var aid = layout.keys[keyIdx];
+      if (aid) this._renderButton(aid);
+    }
+  },
+
+  _renderButton: function(actionId) {
+    var layout = LAYOUTS[this.currentDevice];
+    if (!layout) return;
+
+    var slots = document.querySelectorAll('.key-slot[data-action-id="' + actionId + '"]');
+    if (slots.length === 0) return;
+
+    var state = this.buttonStates[actionId]
+      || ACTION_DEFAULTS[actionId]
+      || { label: actionId, color: "#222222" };
+
+    var svgStr = ButtonRenderer.render(state);
+
+    for (var i = 0; i < slots.length; i++) {
+      setSvgContent(slots[i], svgStr);
+    }
+  },
+
+  _renderButtonAtIndex: function(keyIndex, state) {
+    var slot = document.querySelector('.key-slot[data-key-index="' + keyIndex + '"]');
+    if (!slot) return;
+
+    var svgStr = ButtonRenderer.render(state);
+    setSvgContent(slot, svgStr);
+
+    // Make previously empty slots clickable when they get dynamic content
+    if (slot.classList.contains("empty")) {
+      slot.classList.remove("empty");
+      var self = this;
+      slot.addEventListener("mousedown", function() {
+        slot.classList.add("pressed");
+        self._send({ action: "keyDown", keyIndex: keyIndex });
+      });
+      slot.addEventListener("mouseup", function() { slot.classList.remove("pressed"); });
+      slot.addEventListener("mouseleave", function() { slot.classList.remove("pressed"); });
+    }
+  },
+
+  // ── Gauge & Touch Points ───────────────────────────────────
+  _updateGauge: function() {
+    var fill = document.getElementById("gaugeFill");
+    var label = document.getElementById("gaugeLabel");
+    var tokens = document.getElementById("gaugeTokens");
+    if (!fill) return;
+
+    fill.style.width = Math.min(100, this.gaugeState.percent) + "%";
+    fill.style.background = this.gaugeState.color;
+    if (label) label.textContent = Math.round(this.gaugeState.percent) + "%";
+    if (tokens) tokens.textContent = this.gaugeState.formatted + " / " + this.gaugeState.maxFormatted;
+
+    var stripFill = document.getElementById("touchStripFill");
+    if (stripFill) {
+      stripFill.style.width = Math.min(100, this.gaugeState.percent) + "%";
+      stripFill.style.background = this.gaugeState.color;
+    }
+  },
+
+  _updateTouchPoints: function() {
+    var left = document.getElementById("touchPointLeft");
+    var right = document.getElementById("touchPointRight");
+    if (left && this.touchPointLeds.left) {
+      var l = this.touchPointLeds.left;
+      left.style.background = l.color;
+      left.style.opacity = (l.brightness || 50) / 100;
+      left.style.boxShadow = "0 0 8px " + l.color;
+    }
+    if (right && this.touchPointLeds.right) {
+      var r = this.touchPointLeds.right;
+      right.style.background = r.color;
+      right.style.opacity = (r.brightness || 50) / 100;
+      right.style.boxShadow = "0 0 8px " + r.color;
+    }
+  },
+
+  // ── Hook Simulation ────────────────────────────────────────
+  _bindHookPanel: function() {
+    var self = this;
+    var baseUrl = location.protocol + "//" + (location.hostname || "127.0.0.1") + ":" + (location.port || "8247");
+
+    // Generate random session ID
+    document.getElementById("hookRandomSession").addEventListener("click", function() {
+      document.getElementById("hookSessionId").value = "sim-" + Math.random().toString(36).substring(2, 10);
+    });
+    // Auto-generate initial ID
+    document.getElementById("hookSessionId").value = "sim-" + Math.random().toString(36).substring(2, 10);
+
+    function getSessionId() {
+      return document.getElementById("hookSessionId").value || "sim-default";
+    }
+
+    function setHookStatus(text) {
+      document.getElementById("hookStatus").textContent = text;
+    }
+
+    function postHook(endpoint, body) {
+      self._log("send", "POST " + endpoint);
+      setHookStatus("Sending " + endpoint + "...");
+      return fetch(baseUrl + endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(function(res) {
+        return res.json().then(function(data) {
+          var summary = JSON.stringify(data).substring(0, 80);
+          self._log("recv", res.status + " " + summary);
+          setHookStatus("Response: " + summary);
+          return data;
+        });
+      }).catch(function(err) {
+        self._log("err", err.message);
+        setHookStatus("Error: " + err.message);
+      });
+    }
+
+    // Session Start
+    document.getElementById("hookSessionStart").addEventListener("click", function() {
+      postHook("/hooks/session-start", {
+        session_id: getSessionId(),
+        event: "session-start",
+      });
+    });
+
+    // Session End
+    document.getElementById("hookSessionEnd").addEventListener("click", function() {
+      postHook("/hooks/session-end", {
+        session_id: getSessionId(),
+        event: "session-end",
+      });
+    });
+
+    // Pre-Tool-Use
+    document.getElementById("hookPreTool").addEventListener("click", function() {
+      var tool = document.getElementById("hookToolSelect").value;
+      postHook("/hooks/pre-tool-use", {
+        session_id: getSessionId(),
+        event: "pre-tool-use",
+        tool_name: tool,
+        tool_input: { command: "echo hello" },
+      });
+    });
+
+    // Post-Tool-Use
+    document.getElementById("hookPostTool").addEventListener("click", function() {
+      var tool = document.getElementById("hookToolSelect").value;
+      postHook("/hooks/post-tool-use", {
+        session_id: getSessionId(),
+        event: "post-tool-use",
+        tool_name: tool,
+      });
+    });
+
+    // Stop (Question)
+    document.getElementById("hookStop").addEventListener("click", function() {
+      var message = document.getElementById("hookQuestionMsg").value || "Continue?";
+      postHook("/hooks/stop", {
+        session_id: getSessionId(),
+        event: "stop",
+        stop_hook_active: true,
+        message: message,
+      });
+    });
+  },
+
+  // ── Helpers ────────────────────────────────────────────────
+  _setStatus: function(text) {
+    document.getElementById("statusBar").textContent = text;
+  },
+
+  _log: function(type, text) {
+    var panel = document.getElementById("logPanel");
+    var div = document.createElement("div");
+    div.className = "log-" + type;
+    var d = new Date();
+    var time = ("0"+d.getHours()).slice(-2) + ":" + ("0"+d.getMinutes()).slice(-2) + ":" + ("0"+d.getSeconds()).slice(-2);
+    var arrow = type === "send" ? "\u2192" : type === "recv" ? "\u2190" : "\u2716";
+    div.textContent = time + " " + arrow + " " + text;
+    panel.appendChild(div);
+    panel.scrollTop = panel.scrollHeight;
+    while (panel.children.length > 100) panel.removeChild(panel.firstChild);
+  },
+};
+
+// ═══════════════════════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener("DOMContentLoaded", function() {
+  App.init();
+  App._renderAllButtons();
+});
+</script>
+</body>
+</html>
