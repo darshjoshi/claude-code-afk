@@ -194,7 +194,7 @@ describe("SessionTracker", () => {
       assert.equal(tracker.hasSessionApproval("s1", "Read"), false);
     });
 
-    it("times out held permissions", async () => {
+    it("does NOT time out held permissions (waits indefinitely)", async () => {
       tracker = new SessionTracker({ responseTimeoutMs: 50, cleanupIntervalMs: 60000 });
       tracker.registerSession("s1");
       let resolved = null;
@@ -208,14 +208,12 @@ describe("SessionTracker", () => {
       });
 
       await new Promise((r) => setTimeout(r, 100));
-      assert.deepEqual(resolved, {
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "allow",
-          permissionDecisionReason: "timeout",
-        },
-      });
-      assert.equal(timedOut, true);
+      // Permission should still be pending — no auto-allow on timeout
+      assert.equal(resolved, null);
+      assert.equal(timedOut, false);
+      const session = tracker.getSession("s1");
+      assert.equal(session.status, "permission");
+      assert.notEqual(session.pendingPermission, null);
       tracker.destroy();
     });
   });
@@ -271,6 +269,34 @@ describe("SessionTracker", () => {
   });
 
   describe("cleanup", () => {
+    it("does not mark sessions stale while permission is pending", () => {
+      tracker = new SessionTracker({
+        responseTimeoutMs: 500,
+        staleThresholdMs: 50,
+        cleanupIntervalMs: 60000,
+      });
+      tracker.registerSession("s1");
+      tracker.setPendingPermission("s1", {
+        tool: "Bash",
+        body: {},
+        resolve: () => {},
+      });
+
+      // Backdate lastEventTime to exceed stale threshold
+      const session = tracker.getSession("s1");
+      session.lastEventTime = Date.now() - 100;
+
+      let staleEmitted = false;
+      tracker.on("session:stale", () => (staleEmitted = true));
+
+      // Manually trigger cleanup
+      tracker._cleanupStale();
+
+      assert.equal(session.status, "permission");
+      assert.equal(staleEmitted, false);
+      tracker.destroy();
+    });
+
     it("resolves pending callbacks on remove", () => {
       tracker.registerSession("s1");
       let resolved = null;
