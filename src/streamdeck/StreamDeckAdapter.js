@@ -282,8 +282,14 @@ class StreamDeckAdapter extends EventEmitter {
     });
 
     this.sessionTracker.on("session:updated", ({ sessionId, session, event }) => {
-      // Clear stale alert if session is active again
-      if (session.status !== "stale") {
+      // Clear stale alert if session is active again,
+      // but NEVER clear if a permission or question is pending
+      if (
+        session.status !== "stale" &&
+        session.status !== "permission" &&
+        !session.pendingPermission &&
+        !session.pendingQuestion
+      ) {
         this.alertManager.clearAlert(`session:${sessionId}`);
       }
       this.layoutManager.updateSessions(this.sessionTracker.getAllSessions());
