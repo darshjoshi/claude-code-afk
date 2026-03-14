@@ -29,8 +29,8 @@ class BridgeServer extends EventEmitter {
   /**
    * Register an HTTP route handler.
    */
-  route(method, path, handler) {
-    this._routes.set(`${method.toUpperCase()} ${path}`, handler);
+  route(method, routePath, handler) {
+    this._routes.set(`${method.toUpperCase()} ${routePath}`, handler);
   }
 
   /**
