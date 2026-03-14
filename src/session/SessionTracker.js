@@ -7,14 +7,15 @@ const { EventEmitter } = require("events");
  * When a PreToolUse hook arrives, the HTTP response can be "held" here so
  * the user can approve/deny from the Stream Deck before Claude proceeds.
  *
- * Auto-cleans stale sessions and enforces timeouts on held responses.
+ * Marks sessions as stale after inactivity (never removes them).
+ * Permissions wait indefinitely — no auto-allow on timeout.
  */
 class SessionTracker extends EventEmitter {
   constructor(options = {}) {
     super();
     this._sessions = new Map();
     this._responseTimeoutMs = options.responseTimeoutMs || 25000;
-    this._staleThresholdMs = options.staleThresholdMs || 5 * 60 * 1000;
+    this._staleThresholdMs = options.staleThresholdMs || 60 * 60 * 1000;
     this._cleanupIntervalMs = options.cleanupIntervalMs || 60000;
 
     this._cleanupTimer = setInterval(() => this._cleanupStale(), this._cleanupIntervalMs);
@@ -170,8 +171,6 @@ class SessionTracker extends EventEmitter {
     const pending = session.pendingPermission;
     if (!pending) return;
 
-    if (pending.timeout) clearTimeout(pending.timeout);
-
     // PermissionRequest hook uses a different response format than PreToolUse
     const hookEvent = pending.hookEvent || "PreToolUse";
     let response;
@@ -293,6 +292,9 @@ class SessionTracker extends EventEmitter {
   _cleanupStale() {
     const now = Date.now();
     for (const [id, session] of this._sessions) {
+      // Never mark sessions stale while a permission or question is pending
+      if (session.pendingPermission || session.pendingQuestion) continue;
+
       if (
         session.status !== "stale" &&
         now - session.lastEventTime > this._staleThresholdMs
