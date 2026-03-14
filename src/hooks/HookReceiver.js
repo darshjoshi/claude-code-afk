@@ -52,12 +52,15 @@ class HookReceiver extends EventEmitter {
 
     // Statusline endpoint — receives context_window data from statusline script
     this.bridge.route("POST", "/hooks/statusline", (req, res, body) => {
-      if (this.adapter?.infobarManager && body?.context_window) {
-        const cw = body.context_window;
-        this.adapter.infobarManager.updateContext(
-          cw.tokens_used || cw.tokensUsed || 0,
-          cw.max_tokens || cw.maxTokens || undefined
-        );
+      if (this.adapter?.infobarManager) {
+        // Accept both wrapped { context_window: ... } and raw statusline JSON
+        const cw = body?.context_window || body;
+        if (cw) {
+          this.adapter.infobarManager.updateContext(
+            cw.tokens_used || cw.tokensUsed || 0,
+            cw.max_tokens || cw.maxTokens || undefined
+          );
+        }
       }
       res.writeHead(200, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
