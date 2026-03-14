@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { getDevice, createCustomDevice } = require("../streamdeck/devices");
-const { ACTIONS, LAYOUTS, getLayout, createCustomAction } = require("../streamdeck/actions");
+const { ACTIONS, getLayout, createCustomAction } = require("../streamdeck/actions");
 
 const CONFIG_DIR = path.join(os.homedir(), ".streamdeck-claude");
 const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
